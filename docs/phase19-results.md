@@ -95,7 +95,10 @@ The launcher is being renamed NULD (canvas "NULD — identidad"). link.elf's scr
 loading screen while the main thread waits (perspective floor + wire sphere, the four logo variants 3 s each with
 a glitch cut in scissored bands, the status line), and the menu is black with a faint floor, the drawn wordmark,
 an acid-bordered source tag, HUD corners on the selection and scanlines. There is no Michroma atlas on the PS2: the
-wordmark is strokes (`gfx_stroke`, a solid strip under a 3 px wider gfx_ribbon). Found on the way: AA1 lines take
+wordmark was strokes at first and looked off; it is now vector: `tools/logo.py` bakes the real Michroma, Archivo
+800 (125 %) and IBM Plex Mono 500 outlines, triangulated, into `logo_data.c`, drawn by `gfx_vmesh` (flat triangles + the
+contours as AA1 line strips for the edges). The text atlas (`tools/font.py`, still 512x384: the 1280x720
+framebuffers leave the GS 3200 words) is now Archivo 125 % / Archivo / IBM Plex Mono / a small Michroma NULD. Found on the way: AA1 lines take
 their alpha from coverage, so a horizontal gfx_line has full alpha whatever it is given (the floor's far lines
 crowded bright at the horizon): the floor's horizontal lines are 1 px rects. Still to see on the console: 1 px
 lines on a CRT at 480i.

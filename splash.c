@@ -1,9 +1,9 @@
 // NULD loading screen for link.elf (2026-11-03): the "NULD — identidad" canvas drawn by the GS. A thread at a lower
 // priority than the main one draws it while the main thread sleeps in the IOP reset, DHCP, the HTTP connects and
 // the cover downloads: a perspective floor and a wire sphere (gfx_line, alpha fading with depth), the four logo
-// variants (A ring, B "> nulld", C NULD//, D label) 3 s each with a glitch cut (the logo redrawn in scissored bands,
-// shifted), the status line with a blinking cursor, scanlines. The launcher has no Michroma atlas, so the
-// wordmark is drawn as strokes (gfx_stroke).
+// variants (A ring, B "$ nulld", C NULD//, D label) 3 s each with a glitch cut (the logo redrawn in scissored bands,
+// shifted), the status line with a blinking cursor, scanlines. The logo type is vector (logo_data.c, tools/logo.py):
+// the real Michroma / Archivo / IBM Plex Mono outlines, which no atlas has room for at these sizes.
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -28,97 +28,33 @@ static unsigned char stack[0x8000] __attribute__((aligned(16)));
 static float px[160], py[160];
 static int np;
 static void P(float x, float y) { if (np < 160) px[np] = x, py[np] = y, np++; }
-static void arc(float cx, float cy, float r, float a0, float a1)
-{
-	for (int i = 0; i <= 10; i++) {
-		float a = a0 + (a1 - a0) * i / 10;
-		P(cx + r * cosf(a), cy + r * sinf(a));
-	}
-}
 static void stroke(float t, unsigned c) { gfx_stroke(px, py, np, t, c); np = 0; }
 static void seg(float x0, float y0, float x1, float y1, float t, unsigned c) { np = 0, P(x0, y0), P(x1, y1), stroke(t, c); }
 
-// ---- the wordmark, Michroma-like (wide, rounded corners): letters return their advance ----
-static float N_(float x, float y, float H, float t, unsigned c)
+// ---- vector text: the real logo fonts (logo_data.c) ----
+static const vglyph *vfind(const vfont *f, char ch)
 {
-	float W = 1.22f * H, h = t / 2;
-	seg(x + h, y, x + h, y + H, t, c);
-	seg(x + W - h, y, x + W - h, y + H, t, c);
-	seg(x + h, y + h, x + W - h, y + H - h, t, c);
-	return W;
+	for (int i = 0; i < f->n; i++)
+		if (f->g[i].ch == ch) return &f->g[i];
+	return NULL;
 }
-static float U_(float x, float y, float H, float t, unsigned c)
+float splash_vtext_w(const vfont *f, float cap, float track, const char *s)
 {
-	float W = 1.22f * H, h = t / 2, R = 0.34f * H;
-	np = 0, P(x + h, y);
-	arc(x + R, y + H - R, R - h, PI, PI / 2);
-	arc(x + W - R, y + H - R, R - h, PI / 2, 0);
-	P(x + W - h, y), stroke(t, c);
-	return W;
+	float sc = cap / f->cap, w = 0;
+	for (const char *p = s; *p; p++) {
+		const vglyph *g = vfind(f, *p);
+		w += (g ? g->adv : f->upm * 0.6f) * sc + (p[1] ? track * f->upm * sc : 0); // a space: 0.6 em
+	}
+	return w;
 }
-static float L_(float x, float y, float H, float t, unsigned c)
+void splash_vtext(const vfont *f, float x, float base, float cap, float track, const char *s, unsigned rgb)
 {
-	float W = 1.0f * H, h = t / 2, R = 0.9f * t;
-	np = 0, P(x + h, y);
-	arc(x + R, y + H - R, R - h, PI, PI / 2);
-	P(x + W, y + H - h), stroke(t, c);
-	return W;
-}
-static float D_(float x, float y, float H, float t, unsigned c)
-{
-	float W = 1.22f * H, h = t / 2, R = 0.34f * H;
-	seg(x + h, y, x + h, y + H, t, c);
-	np = 0, P(x, y + h);
-	arc(x + W - R, y + R, R - h, -PI / 2, 0);
-	arc(x + W - R, y + H - R, R - h, 0, PI / 2);
-	P(x, y + H - h), stroke(t, c);
-	return W;
-}
-#define GAP 0.3f
-float splash_word_w(float H) { return (1.22f * 3 + 1.0f + 3 * GAP) * H; }
-void splash_word(float x, float y, float H, float t, unsigned c)
-{
-	x += N_(x, y, H, t, c) + GAP * H;
-	x += U_(x, y, H, t, c) + GAP * H;
-	x += L_(x, y, H, t, c) + GAP * H;
-	D_(x, y, H, t, c);
-}
-
-// lower case for "> nulld" (monospaced: every letter 0.9 H wide), x-height from 0.32 H
-#define XH 0.32f
-static void n_(float x, float y, float H, float t, unsigned c)
-{
-	float W = 0.9f * H, h = t / 2, R = 0.3f * H, xh = y + XH * H;
-	seg(x + h, xh, x + h, y + H, t, c);
-	np = 0, P(x + h, xh + R);
-	arc(x + R, xh + R, R - h, PI, 1.5f * PI);
-	arc(x + W - R, xh + R, R - h, 1.5f * PI, 2 * PI);
-	P(x + W - h, y + H), stroke(t, c);
-}
-static void u_(float x, float y, float H, float t, unsigned c)
-{
-	float W = 0.9f * H, h = t / 2, R = 0.3f * H, xh = y + XH * H;
-	np = 0, P(x + h, xh);
-	arc(x + R, y + H - R, R - h, PI, PI / 2);
-	arc(x + W - R, y + H - R, R - h, PI / 2, 0);
-	stroke(t, c);
-	seg(x + W - h, xh, x + W - h, y + H, t, c);
-}
-static void l_(float x, float y, float H, float t, unsigned c)
-{
-	float W = 0.9f * H, h = t / 2;
-	seg(x + W * 0.5f, y, x + W * 0.5f, y + H, t, c);
-	seg(x + W * 0.16f, y + h, x + W * 0.5f + h, y + h, t, c);
-	seg(x + W * 0.1f, y + H - h, x + W * 0.9f, y + H - h, t, c);
-}
-static void d_(float x, float y, float H, float t, unsigned c)
-{
-	float W = 0.9f * H, h = t / 2, R = 0.3f * H, xh = y + XH * H;
-	seg(x + W - h, y, x + W - h, y + H, t, c);
-	np = 0, P(x + W, xh + h);
-	arc(x + R, xh + R, R - h, 1.5f * PI, PI);
-	arc(x + R, y + H - R, R - h, PI, PI / 2);
-	P(x + W, y + H - h), stroke(t, c);
+	float sc = cap / f->cap;
+	for (const char *p = s; *p; p++) {
+		const vglyph *g = vfind(f, *p);
+		if (g) gfx_vmesh(g->v, g->nv, g->tri, g->ntri, g->ctr, g->nctr, x, base, sc, rgb);
+		x += (g ? g->adv : f->upm * 0.6f) * sc + track * f->upm * sc;
+	}
 }
 
 void splash_mark(float cx, float cy, float r)
@@ -131,39 +67,33 @@ void splash_mark(float cx, float cy, float r)
 	seg(cx - d, cy + d, cx + d, cy - d, t, ACID);
 }
 
-// ---- the four variants, centred on (640, 300); dx shifts them for the glitch ----
+// ---- the four variants (canvas board "Logo alterno"), centred on (640, 300); dx shifts them for the glitch ----
 static int blink(float s) { return (int)(s * 1.9f) & 1; }
 static void variant(int k, float dx, float s)
 {
-	if (k == 0) { // A: ring + wordmark
-		float H = 88, ww = splash_word_w(H), x = 640 - (120 + 36 + ww) / 2 + dx;
-		splash_mark(x + 60, 300, 60);
-		splash_word(x + 156, 300 - H / 2, H, 14, FG);
-	} else if (k == 1) { // B: > nulld + cursor
-		float H = 110, t = 12, a = 0.9f * H + 0.18f * H, x = 640 - (0.75f * H + 5 * a + 0.5f * H) / 2 + dx, y = 300 - H / 2;
-		float xh = y + XH * H, mid = (xh + y + H) / 2;
-		seg(x, xh, x + 0.5f * H, mid, t, ACID);
-		seg(x + 0.5f * H, mid, x, y + H, t, ACID);
-		x += 0.75f * H;
-		n_(x, y, H, t, FG), x += a;
-		u_(x, y, H, t, FG), x += a;
-		l_(x, y, H, t, FG), x += a;
-		l_(x, y, H, t, FG), x += a;
-		d_(x, y, H, t, FG), x += a;
-		if (!blink(s)) gfx_rect((int)x, (int)(y + 0.1f * H), (int)(0.45f * H), (int)(0.9f * H), ACID);
-	} else if (k == 2) { // C: NULD//
-		float H = 96, t = 15, ww = splash_word_w(H), x = 640 - (ww + GAP * H + 0.95f * H) / 2 + dx, y = 300 - H / 2;
-		splash_word(x, y, H, t, FG);
-		float sx = x + ww + GAP * H;
-		seg(sx, y + H, sx + 0.42f * H, y, t, ACID);
-		seg(sx + 0.5f * H, y + H, sx + 0.92f * H, y, t, ACID);
+	if (k == 0) { // A: the ring + NULD in Michroma (128 px type: 96 px caps)
+		float cap = 96, ww = splash_vtext_w(&vfont_michroma, cap, 0.06f, "NULD"), x = 640 - (132 + 40 + ww) / 2 + dx;
+		splash_mark(x + 66, 300, 66);
+		splash_vtext(&vfont_michroma, x + 172, 300 + cap / 2, cap, 0.06f, "NULD", FG);
+	} else if (k == 1) { // B: $ nulld in IBM Plex Mono 500 (132 px type) + a block cursor
+		float fs = 132, cap = fs * vfont_plex_medium.cap / vfont_plex_medium.upm, base = 300 + cap / 2;
+		float ww = splash_vtext_w(&vfont_plex_medium, cap, -0.02f, "$ nulld"), x = 640 - (ww + 0.52f * fs) / 2 + dx;
+		splash_vtext(&vfont_plex_medium, x, base, cap, -0.02f, "$", ACID);
+		splash_vtext(&vfont_plex_medium, x + splash_vtext_w(&vfont_plex_medium, cap, -0.02f, "$ ") - 0.02f * fs, base, cap, -0.02f, "nulld", FG);
+		if (!blink(s)) gfx_rect((int)(x + ww + 0.08f * fs), (int)(base - cap), (int)(0.44f * fs), (int)(cap + 0.1f * fs), ACID);
+	} else if (k == 2) { // C: NULD// in Archivo 800 at 125 % (132 px type)
+		float cap = 132 * 0.686f, ww = splash_vtext_w(&vfont_archivo_heavy, cap, 0.02f, "NULD//"), x = 640 - ww / 2 + dx;
+		float wn = splash_vtext_w(&vfont_archivo_heavy, cap, 0.02f, "NULD") + 0.02f * 132;
+		splash_vtext(&vfont_archivo_heavy, x, 300 + cap / 2, cap, 0.02f, "NULD", FG);
+		splash_vtext(&vfont_archivo_heavy, x + wn, 300 + cap / 2, cap, 0.02f, "//", ACID);
 	} else { // D: the hardware label
-		int bw = 640, x = 320 + (int)dx, y = 196, top = 150, bot = 64;
+		int bw = 680, x = 300 + (int)dx, y = 196, top = 150, bot = 64;
 		gfx_rect(x, y, bw, 2, FG), gfx_rect(x, y + top + bot, bw, 2, FG);
 		gfx_rect(x, y, 2, top + bot + 2, FG), gfx_rect(x + bw - 2, y, 2, top + bot + 2, FG);
 		gfx_rect(x, y + top, bw, 2, FG);
-		splash_mark(x + 34 + 46, y + top / 2 + 4, 46);
-		splash_word(x + 34 + 92 + 30, y + top / 2 + 4 - 31, 62, 11, FG);
+		splash_mark(x + 34 + 52, y + top / 2 + 2, 52);
+		float cap = 88 * 0.686f;
+		splash_vtext(&vfont_archivo_heavy, x + 34 + 104 + 32, y + top / 2 + 2 + cap / 2, cap, 0.02f, "NULD", FG);
 		static const unsigned char bars[30] = {3, 1, 2, 1, 4, 1, 1, 3, 2, 1, 1, 2, 4, 1, 3, 1, 2, 2, 1, 4, 1, 1, 3, 1, 2, 1, 4, 2, 1, 3};
 		int bx = x + 18;
 		for (int i = 0; i < 30; i++) gfx_rect(bx, y + top + 14, bars[i], bot - 26, FG), bx += bars[i] + 2;
@@ -174,7 +104,7 @@ static void variant(int k, float dx, float s)
 		gfx_alpha(0x60), gfx_rect(sx, y + 2, 2, top + bot - 2, ACID), gfx_alpha(0x80);
 	}
 }
-static const int variant_top[4] = {240, 230, 245, 190}, variant_bot[4] = {360, 370, 355, 420};
+static const int variant_top[4] = {230, 232, 252, 190}, variant_bot[4] = {370, 372, 348, 420};
 
 // ---- background ----
 void splash_floor(float s, unsigned rgb, int amax)

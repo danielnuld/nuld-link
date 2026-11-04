@@ -410,6 +410,28 @@ void gfx_stroke(const float *px, const float *py, int n, float width, unsigned r
 	gfx_ribbon(px, py, n, width + 3, rgb, alpha);
 }
 
+// a vector glyph (tools/logo.py): its triangles filled flat, then its contours again as AA1 line strips, which
+// blend the edges by coverage. v: x y pairs in font units, y up; on screen (ox + x * s, oy - y * s)
+void gfx_vmesh(const short *v, int nv, const unsigned short *tri, int ntri, const unsigned short *ctr, int nctr,
+               float ox, float oy, float s, unsigned rgb)
+{
+	if (!room(2 + 3 * ntri)) return;
+	prim(GS_PRIM_TRIANGLE, 0, 0, alpha < 0x80, 0);
+	rgba(rgb);
+	for (int i = 0; i < 3 * ntri; i++)
+		xyz16((int)((ox + v[2 * tri[i]] * s) * 16), (int)((oy - v[2 * tri[i] + 1] * s) * 16));
+	for (int c = 0; c < nctr; c++) {
+		int a = ctr[c], b = c + 1 < nctr ? ctr[c + 1] : nv;
+		if (!room(3 + b - a)) return;
+		prim(GS_PRIM_LINE_STRIP, 0, 0, 1, 1);
+		rgba(rgb);
+		for (int k = a; k <= b; k++) {
+			int j = k < b ? k : a; // closed: back to the first point
+			xyz16((int)((ox + v[2 * j] * s) * 16), (int)((oy - v[2 * j + 1] * s) * 16));
+		}
+	}
+}
+
 void gfx_scissor(int x0, int y0, int x1, int y1)
 {
 	if (!room(1)) return;

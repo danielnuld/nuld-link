@@ -1,4 +1,5 @@
 #pragma once
+#include "logo_data.h"
 // NULD loading screen: a thread draws it while the main thread waits (IOP modules, network, the PC, covers)
 void splash_start(void);              // draws until splash_stop; nothing else may use gfx meanwhile
 void splash_msg(const char *s);       // the status line(s) under the logo ('\n' splits lines)
@@ -12,6 +13,8 @@ void splash_mark(float cx, float cy, float r); // the ∅ mark (ring + acid slas
 #define NULD_ACID 0xC8FF2E
 void splash_floor(float s, unsigned rgb, int a); // clears to NULD_BG, then the perspective floor (lines at alpha a)
 void splash_scan(void);                          // CRT scanlines over everything: draw it last
-float splash_word_w(float H);                    // the drawn "NULD" wordmark, H px tall, stroke t
-void splash_word(float x, float y, float H, float t, unsigned rgb);
+// vector text in the logo fonts (logo_data.c: vfont_michroma "NULD", vfont_archivo_heavy "NULD/", vfont_plex_medium
+// "$nuld"): cap px tall, track in em after each letter, from x on the baseline
+float splash_vtext_w(const vfont *f, float cap, float track, const char *s);
+void splash_vtext(const vfont *f, float x, float base, float cap, float track, const char *s, unsigned rgb);
 void splash_hud(int x, int y, int w, int h, int len); // acid corner brackets around a box

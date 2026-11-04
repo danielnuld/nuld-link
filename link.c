@@ -534,7 +534,7 @@ static void draw_menu(float s, int sel, float t)
 	splash_floor(t * 0.5f, NULD_FG, 0x12);
 	// header: the mark + wordmark, the links on the right
 	splash_mark(81, 56, 17);
-	splash_word(112, 47, 18, 3.5f, NULD_FG);
+	splash_vtext(&vfont_michroma, 112, 64, 15, 0.06f, "NULD", NULD_FG); // Michroma 20 px: 15 px caps
 	static const char *const st[3] = {"USB", "RED", "PC"};
 	int x = GFX_W - 64;
 	gfx_tracking(2);
