@@ -17,6 +17,78 @@ Coded on 2026-10-16. **The spike has not run on the console yet.**
 - Found on the way: on Windows `SO_REUSEADDR` let an orphaned `ffmpeg -listen 1` share port 8099 and take the
   connection; link.py sets it only off Windows.
 
+## PCSX2 2.x (SCPH-75001 BIOS, DEV9 "Sockets", 64 MB FAT32 USB image with only orbit/config.ini), 2026-11-03
+
+`link.elf` run with `-elf`: USB mounted, config read, DHCP from PCSX2, connected to 192.168.100.8:8099, 512x448 at
+33 ms per picture. First 5 s windows: 27.6 then 30.6 shown/s, skipped 0, decode 5 ms avg (22 / 8 max), ring 3 KB,
+pad 62/s at the PS2 end and on link.py. The TV window shows the PC desktop (a mirror tunnel of PCSX2 itself).
+Timing in PCSX2 is not cycle-accurate: decode time and latency still belong to the console gate.
+
+## Catalog in PCSX2, 2026-11-03
+
+Fake catalog (scratchpad wrapper over link.py: Fortnite with its catcache cover, one entry without a cover): the menu
+shows Desktop, the cover and the drawn card; right + X launched the entry and the stream started (29.9 shown/s, pad
+62/s); L1+L2+R1+R2+TRIANGLE stopped it (511 decoded, 511 shown) and the menu came back on the same entry. Bug found:
+the eased selection never reached `sel` exactly, so the big card sat in the row's right half (snap under 0.01;
+orbit-jellyfin's jfplay browse has the same formula).
+
+## Real catalog and the devlog take, PCSX2 2026-11-03
+
+Epic's launcher (Nov 2026) keeps no `Data/Manifests/*.item`: installs are listed in
+`ProgramData/Epic/EpicOnlineServicesShared/InstallHelper/InstalledItems/*.egi` (state, dir, launchExe, sandboxId =
+namespace, itemId, artifactId = app name); names, categories and covers come from `catcache.bin` by itemId. Catalog:
+Among Us, Fortnite, Sonic Mania, all three with covers.
+
+Take (`%USERPROFILE%/Videos/ORBIT Link/orbit-link-sonic-2026-11-03.mp4`, 3:10, 1920x1080 60 fps, h264_qsv): Sonic
+Mania windowed at the left half (client 0,270 960x540), PCSX2 16:9 at the right half (display 960,270 960x540),
+`link.py --region 0,270,960x540`, the desktop recorded and the two halves cropped side by side. Boot -> menu ->
+Sonic Mania launched from the PS2 -> SEGA, title, intro, Green Hill played with the PS2 pad -> L1+L2+R1+R2+TRIANGLE
+back to the menu. Stream during play: 30.0 decoded/s, 29.4-29.9 shown/s, 2-3 skipped per 5 s, decode 6-8 ms avg,
+512 KB/s, pad 62/s. Sonic's own timer read 0'31"42 on the PC and 0'31"27 on the PS2 in the same frame (~150 ms,
+PCSX2 + capture; the console gate still decides). Sonic Mania keeps drawing without focus, so PCSX2 can hold it.
+No sound in the take (Link has none yet; gdigrab records none).
+
+## Audio, PCSX2 2026-11-03
+
+PC: no Stereo Mix on this laptop, so link.py records the default speakers through WASAPI loopback (`pip install
+soundcard`; it pads silence, so ffmpeg's audio input never starves) and writes 48 kHz s16 to ffmpeg's stdin; MP2
+192 kbit/s in the same program stream, `-max_interleave_delta 1` (no interleaving hold) and `-packetsize 512`: vob's
+2048-byte packs carry 85 ms of audio each, and the PS2 got it in 85 ms bursts.
+
+PS2: jfplay's audio thread without the clock. Two wrong turns first: a cap on `audsrv_queued()` dropped frames all the
+time and the queue still read 0 now and then. audsrv (iop/sound/audsrv/src/audsrv.c) has a fixed ring of 10 x 2048
+bytes (106 ms at 48 kHz stereo) that its play thread reads at 48 kHz whether data is there or not: overtaken, it
+replays stale samples; `audsrv_play_audio` cuts what does not fit; `audsrv_queued()` reads 0 when the ring is exactly
+full. So the ring is kept full (`audsrv_wait_audio` before every frame, audsrv sets the pace) and the latency is
+bounded before it: more than AUDIO_MS (150) of MP2 waiting = one cut to the newest data.
+
+Result over 45 s of a looping Windows sound: 0 cuts, audsrv full the whole time, video unchanged (29-30 shown/s).
+Echo test (PCSX2 volume 40, a 250 ms 1 kHz beep, loopback recorded): the PS2's copy came back 480 ms after the
+original, 72 % of its energy at 1 kHz (the rest: the next echo already on top, MP2). That 480 ms holds loopback
+capture, MP2 encode, network, ~150 ms worst on the PS2 side + 106 ms audsrv, and PCSX2's own audio output buffer.
+
+## Audio moved out of the program stream, PCSX2 2026-11-03
+
+The take with sound (`orbit-link-sonic-audio-2026-11-03.mp4`, audio still muxed) showed the PS2 side freezing and far
+behind: 14-54 pictures skipped per 5 s (2-3 without audio), decode 6 -> 10-12 ms, Sonic's timer ~320 ms behind
+(150 before). Not the audio thread's priority (0x28 -> 0x70, under the main thread: still 3-55 skipped, ~310 ms).
+FFmpeg's program stream muxer emits a pack only when every stream's FIFO holds a packet's worth (mpegenc.c
+output_packet ~1038-1049) and the generic interleaver waits for a packet of each stream (mux.c ~1012;
+`-max_interleave_delta 1` does not bypass it): the video left in bursts paced by the audio frames.
+
+Now: the same ffmpeg has a second output, MP2 to 127.0.0.1 one 24 ms frame per datagram; link.py relays it from UDP
+8097 to where the PS2's "OLA1" hellos come from (once a second from link.c's port 8097: PCSX2's Sockets network
+and NATs let in only answers). The video output has one stream again (`-packetsize` back to 2048). Result in PCSX2
+with Sonic running: audsrv full, 0 cuts, the timer 150-220 ms behind. Pictures were still skipped (9-72 per 5 s),
+and a baseline without audio was not taken in the same conditions (the PC was in use): PCSX2 under the load of
+Sonic + two ffmpeg + the laptop's other work likely falls below real time, which the PS2 side reads as "behind".
+The console decides.
+
+Take with sound, audio over UDP (`orbit-link-sonic-audio-2026-11-03.mp4`, 2:22, 1080p60 + AAC of Windows' sound,
+PCSX2 muted): audsrv full, 0 cuts; Sonic's timer 180-190 ms behind on the PS2; 11 pictures skipped per 5 s on
+average (4-39). The PS2 counted 32 decoded pictures per second of its own clock for a 30 fps stream: PCSX2 ran ~6 %
+under real time on the laptop (Sonic + two ffmpeg + recorder), and the PS2 side reads that as falling behind.
+
 ## Console gate (to do)
 
 1. On the PC: `pip install vgamepad`, then `python server/link.py`. Windows asks to allow Python (UDP 8098) and ffmpeg
