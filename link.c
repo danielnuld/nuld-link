@@ -45,17 +45,10 @@
 #include "http.h"
 #include "mpegps.h"
 #include "ui_data.h"
+#include "splash.h"
 
 #define TEXT 0xEEF3FF
 #define TEXT2 0xA9B6D3
-#define LABEL 0x8FA0C4
-#define ICE 0x7FE7FF
-#define NAVY 0x0D1736
-#define NIGHT 0x04060E
-#define CHROME_T 0xF4F8FF
-#define CHROME_B 0xAAB7D2
-#define IRIS 0xC08BFF
-#define INK 0x0A1026
 #define LOG "mass0:/link.txt"
 #define VIDEO_PORT 8099
 #define PAD_PORT 8098
@@ -335,15 +328,11 @@ static void draw_picture(int w, int h, const char *osd)
 	gfx_flip();
 }
 
-static void screen(const char *title, const char *body)
+static void screen(const char *title, const char *body) // everything before the menu: the NULD splash (splash.c)
 {
-	gfx_begin();
-	gfx_alpha(0x80);
-	gfx_rect(0, 0, GFX_W, GFX_H, 0x04060E);
-	gfx_text(&gfx_font_title, 64, 48, title, TEXT);
-	gfx_text(&gfx_font_mono, 64, 120, body, TEXT2);
-	gfx_end();
-	gfx_flip();
+	(void)title;
+	splash_msg(body);
+	splash_start();
 }
 
 static unsigned edges(unsigned b) // the buttons that went down since the last call
@@ -491,77 +480,97 @@ static void load_covers(void) // ponytail: all at once at the start (188 KB each
 	}
 }
 
-// a button hint pill, right-aligned at x (jfplay.c / launcher.c hint(); action_icon -1 = none). Returns the next x
-static int hint(int x, int y, int key_icon, const char *key_text, int action_icon, const char *label)
-{
-	int lw = gfx_text_width(&gfx_font_ui, label);
-	int kw = key_icon >= 0 ? 30 : gfx_text_width(&gfx_font_mono, key_text) + 20, aw = action_icon >= 0 ? 28 : 0;
-	int w = 8 + kw + 10 + aw + lw + 18, x0 = x - w;
-	gfx_alpha(0x2D);
-	gfx_rrect(x0, y, w, 44, 22, TEXT2, TEXT2);
-	gfx_alpha(0x80);
-	gfx_rrect(x0 + 1, y + 1, w - 2, 42, 21, 0x0B1430, 0x0A1128);
-	int kx = x0 + 8;
-	if (key_icon >= 0) {
-		gfx_rrect(kx, y + 7, 30, 30, 15, CHROME_T, CHROME_B);
-		gfx_icon(key_icon, kx + 8, y + 15, IRIS);
-	} else {
-		gfx_rrect(kx, y + 9, kw, 26, 13, CHROME_T, CHROME_B);
-		gfx_text(&gfx_font_mono, kx + 10, y + 12, key_text, INK);
-	}
-	if (aw) gfx_icon(action_icon, kx + kw + 10, y + 13, ICE);
-	gfx_text(&gfx_font_ui, kx + kw + 10 + aw, y + 11, label, TEXT);
-	return x0 - 12;
-}
-
+// ---- menu, in the NULD look (the canvas "NULD — identidad", board "Inicio"): black, a faint floor, the drawn
+// wordmark, an acid-bordered source tag, HUD corners on the selection, scanlines ----
 static const char *entry(int i) { return i ? gname[i - 1] : L("Escritorio", "Desktop"); }
 
-static void card(int i, int x, int y, int big) // the cover, or a drawn card with the name
+static void cut_to(char *t, int n, int w) // shorten to w px, whole UTF-8 letters. ponytail: cut, not wrapped
 {
-	int w = big ? COVER_W : COVER_SW, h = big ? COVER_H : COVER_SH;
-	if (i && gcover[i - 1]) { gfx_image(gcover[i - 1], COVER_W, COVER_H, x, y, w, h); return; }
-	gfx_rrect(x, y, w, h, 10, 0x1B2850, 0x0D1530);
-	if (!i) gfx_icon(UI_NET_18, x + w / 2 - 9, y + h / 2 - 30, ICE);
-	char t[64];
-	int n = snprintf(t, sizeof(t), "%s", entry(i));
-	while (n > 0 && gfx_text_width(&gfx_font_ui, t) > w - 28) { // ponytail: cut to the card, not wrapped
+	while (n > 0 && gfx_text_width(&gfx_font_ui, t) > w) {
 		t[--n] = 0;
-		while (n > 0 && (t[n - 1] & 0xC0) == 0x80) t[--n] = 0; // whole UTF-8 letters
+		while (n > 0 && (t[n - 1] & 0xC0) == 0x80) t[--n] = 0;
 		if (n > 0 && (unsigned char)t[n - 1] >= 0xC0) t[--n] = 0;
 	}
-	gfx_text(&gfx_font_ui, x + 14, y + h - 50, t, TEXT2);
 }
 
-static void draw_menu(float s, int sel)
+static void card(int i, int x, int y, int big) // the cover, or a hatched panel with the name
+{
+	int w = big ? COVER_W : COVER_SW, h = big ? COVER_H : COVER_SH;
+	if (i && gcover[i - 1]) gfx_image(gcover[i - 1], COVER_W, COVER_H, x, y, w, h);
+	else {
+		gfx_alpha(0x80), gfx_rect(x, y, w, h, 0x11141A);
+		gfx_scissor(x, y, x + w - 1, y + h - 1);
+		gfx_alpha(0x10);
+		for (int d = -h; d < w; d += 12) {
+			float lx[2] = {(float)(x + d), (float)(x + d + h)}, ly[2] = {(float)(y + h), (float)y};
+			gfx_stroke(lx, ly, 2, 1, NULD_FG);
+		}
+		gfx_alpha(0x80);
+		gfx_scissor(0, 0, GFX_W - 1, GFX_H - 1);
+		gfx_text(&gfx_font_mono, x + 14, y + 12, i ? gsrc[i - 1] : "PC", NULD_MUTED);
+		char t[64];
+		cut_to(t, snprintf(t, sizeof(t), "%s", entry(i)), w - 28);
+		gfx_text(&gfx_font_ui, x + 14, y + h - 34, t, NULD_FG);
+	}
+	unsigned edge = big ? 0x3A4150 : 0x232833; // 1 px frame
+	gfx_rect(x, y, w, 1, edge), gfx_rect(x, y + h - 1, w, 1, edge), gfx_rect(x, y, 1, h, edge), gfx_rect(x + w - 1, y, 1, h, edge);
+}
+
+static void cross_hint(int xr, int y, const char *label) // the ✕ button hint, right-aligned at xr: ring + acid cross
+{
+	int lw = gfx_text_width(&gfx_font_ui, label), cx = xr - lw - 12 - 13, cy = y + 13;
+	float rx[34], ry[34];
+	for (int i = 0; i < 34; i++) rx[i] = cx + 12 * cosf(i * 6.2832f / 32), ry[i] = cy + 12 * sinf(i * 6.2832f / 32);
+	gfx_stroke(rx, ry, 34, 1.2f, NULD_MUTED);
+	float ax[2] = {cx - 4.5f, cx + 4.5f}, ay[2] = {cy - 4.5f, cy + 4.5f}, bx[2] = {cx + 4.5f, cx - 4.5f};
+	gfx_stroke(ax, ay, 2, 1.8f, NULD_ACID), gfx_stroke(bx, ay, 2, 1.8f, NULD_ACID);
+	gfx_text(&gfx_font_ui, xr - lw, y + 3, label, NULD_FG);
+}
+
+static void draw_menu(float s, int sel, float t)
 {
 	char a[32];
 	gfx_begin();
-	gfx_alpha(0x80);
-	gfx_dither(1);
-	gfx_grad(0, 0, GFX_W, GFX_H, NAVY, NIGHT, 1);
-	gfx_dither(0);
-	gfx_orb(64, 40, 56);
+	splash_floor(t * 0.5f, NULD_FG, 0x12);
+	// header: the mark + wordmark, the links on the right
+	splash_mark(81, 56, 17);
+	splash_word(112, 47, 18, 3.5f, NULD_FG);
+	static const char *const st[3] = {"USB", "RED", "PC"};
+	int x = GFX_W - 64;
 	gfx_tracking(2);
-	gfx_text(&gfx_font_mono, 140, 52, "ORBIT LINK", ICE);
-	gfx_rect(140, 74, gfx_text_width(&gfx_font_mono, "ORBIT LINK"), 2, ICE);
+	for (int i = 2; i >= 0; i--) {
+		x -= gfx_text_width(&gfx_font_mono, st[i]);
+		gfx_text(&gfx_font_mono, x, 49, st[i], 0xA9B0BA);
+		if (i < 2 || ((int)(t * 1.25f) & 1) == 0) gfx_rect(x - 15, 53, 7, 7, NULD_ACID); // PC pulses: the PC is live
+		x -= 15 + 26;
+	}
 	gfx_tracking(0);
-	gfx_text(&gfx_font_title, 64, 98, entry(sel), TEXT);
+	// the entry: title, source tag, what X does
+	gfx_text(&gfx_font_title, 64, 112, entry(sel), NULD_FG);
 	const char *src = sel ? gsrc[sel - 1] : "PC";
-	int cw = gfx_text_width(&gfx_font_ui, src) + 24;
-	gfx_rrect(64, 150, cw, 28, 14, CHROME_T, CHROME_B);
-	gfx_text(&gfx_font_ui, 76, 153, src, INK);
-	int py = 232; // the row: selected card big at x 64, the rest small to its right, sliding with s
+	int tw = gfx_text_width(&gfx_font_mono, src);
+	gfx_rect(64, 168, tw + 20, 1, NULD_ACID), gfx_rect(64, 194, tw + 20, 1, NULD_ACID);
+	gfx_rect(64, 168, 1, 27, NULD_ACID), gfx_rect(64 + tw + 19, 168, 1, 27, NULD_ACID);
+	gfx_text(&gfx_font_mono, 74, 173, src, NULD_ACID);
+	gfx_tracking(1);
+	gfx_text(&gfx_font_mono, 64 + tw + 36, 173, sel ? L("SE ABRE EN LA PC", "OPENS ON THE PC") : L("LA PANTALLA DE LA PC", "THE PC'S SCREEN"), 0xA9B0BA);
+	gfx_tracking(0);
+	// the row: selected card big at x 64, the rest small to its right, bottoms aligned, sliding with s
+	int py = 232;
 	for (int i = 0; i <= ngames; i++) {
 		float d = i - s;
 		int big = i == sel && fabsf(d) < 0.5f;
 		int px = 64 + (d <= 0 ? (int)(d * (COVER_SW + 24)) : COVER_W + 32 + (int)((d - 1) * (COVER_SW + 24)));
 		if (px > GFX_W || px + COVER_W < 0) continue;
-		card(i, px, big ? py : py + (COVER_H - COVER_SH) / 2, big);
-		if (big) gfx_rrect(px - 4, py - 4, COVER_W + 8, 3, 1, ICE, ICE);
+		card(i, px, big ? py : py + COVER_H - COVER_SH, big);
+		if (big) splash_hud(px - 12, py - 12, COVER_W + 24, COVER_H + 24, 30);
 	}
 	snprintf(a, sizeof(a), "%02d / %02d", sel + 1, ngames + 1);
-	gfx_text(&gfx_font_mono, 64, 664, a, LABEL);
-	hint(GFX_W - 64, 652, UI_CROSS_14, NULL, UI_PLAY_18, sel ? L("Jugar", "Play") : L("Ver", "View"));
+	gfx_tracking(2);
+	gfx_text(&gfx_font_mono, 64, 668, a, NULD_MUTED);
+	gfx_tracking(0);
+	cross_hint(GFX_W - 64, 660, sel ? L("Jugar", "Play") : L("Ver", "View"));
+	splash_scan();
 	gfx_end();
 	gfx_flip();
 }
@@ -570,6 +579,7 @@ static int menu(void) // 0 = the desktop, n = game n; -1 = leave
 {
 	static int sel;
 	float s = sel;
+	clock_t t0 = clock();
 	edges(pad_buttons()); // the combo that brought us here is not a press
 	for (;;) {
 		unsigned b = pad_buttons(), p = edges(b);
@@ -579,7 +589,7 @@ static int menu(void) // 0 = the desktop, n = game n; -1 = leave
 		if (p & PAD_CROSS) return sel;
 		s += (sel - s) * 0.22f;
 		if (fabsf(sel - s) < 0.01f) s = sel; // a d of +0.0001 would put the big card in the row's right half
-		draw_menu(s, sel);
+		draw_menu(s, sel, (float)(clock() - t0) / CLOCKS_PER_SEC);
 	}
 }
 
@@ -641,6 +651,7 @@ int main(void)
 		if (leave) break;
 	}
 	if (!leave) screen("ORBIT Link", L("Cargando portadas...", "Loading covers...")), load_covers();
+	splash_stop(); // the menu and the stream draw for themselves
 	while (!leave) {
 		int g = menu();
 		if (g < 0) break;

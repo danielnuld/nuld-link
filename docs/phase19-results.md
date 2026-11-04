@@ -89,6 +89,17 @@ PCSX2 muted): audsrv full, 0 cuts; Sonic's timer 180-190 ms behind on the PS2; 1
 average (4-39). The PS2 counted 32 decoded pictures per second of its own clock for a 30 fps stream: PCSX2 ran ~6 %
 under real time on the laptop (Sonic + two ffmpeg + recorder), and the PS2 side reads that as falling behind.
 
+## NULD look, PCSX2 2026-11-03
+
+The launcher is being renamed NULD (canvas "NULD — identidad"). link.elf's screens follow it: `splash.c` draws the
+loading screen while the main thread waits (perspective floor + wire sphere, the four logo variants 3 s each with
+a glitch cut in scissored bands, the status line), and the menu is black with a faint floor, the drawn wordmark,
+an acid-bordered source tag, HUD corners on the selection and scanlines. There is no Michroma atlas on the PS2: the
+wordmark is strokes (`gfx_stroke`, a solid strip under a 3 px wider gfx_ribbon). Found on the way: AA1 lines take
+their alpha from coverage, so a horizontal gfx_line has full alpha whatever it is given (the floor's far lines
+crowded bright at the horizon): the floor's horizontal lines are 1 px rects. Still to see on the console: 1 px
+lines on a CRT at 480i.
+
 ## Console gate (to do)
 
 1. On the PC: `pip install vgamepad`, then `python server/link.py`. Windows asks to allow Python (UDP 8098) and ffmpeg

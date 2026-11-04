@@ -394,6 +394,28 @@ void gfx_ribbon(const float *px, const float *py, int n, float width, unsigned r
 	}
 }
 
+// solid thick polyline (current alpha) under a gfx_ribbon 3 px wider: crisp letters with a 1-2 px soft edge
+void gfx_stroke(const float *px, const float *py, int n, float width, unsigned rgb)
+{
+	if (n < 2 || !room(2 + 2 * n)) return;
+	prim(GS_PRIM_TRIANGLE_STRIP, 0, 0, alpha < 0x80, 0);
+	rgba(rgb);
+	for (int i = 0; i < n; i++) {
+		int i0 = i ? i - 1 : 0, i1 = i < n - 1 ? i + 1 : n - 1;
+		float tx = px[i1] - px[i0], ty = py[i1] - py[i0], l = sqrtf(tx * tx + ty * ty);
+		float nx = l > 0 ? -ty / l * width / 2 : 0, ny = l > 0 ? tx / l * width / 2 : 0;
+		xyz16((int)((px[i] + nx) * 16), (int)((py[i] + ny) * 16));
+		xyz16((int)((px[i] - nx) * 16), (int)((py[i] - ny) * 16));
+	}
+	gfx_ribbon(px, py, n, width + 3, rgb, alpha);
+}
+
+void gfx_scissor(int x0, int y0, int x1, int y1)
+{
+	if (!room(1)) return;
+	PACK_GIFTAG(q, GS_SET_SCISSOR(x0, x1, y0, y1), GS_REG_SCISSOR); q++;
+}
+
 // textured quad, screen rect in 1/16 px, texels (u, v)-(u2, v2) in 1/16, colour top -> bottom (true RGB), blended
 static void tquad16(unsigned long long tex0, int x0, int y0, int x1, int y1, int u, int v, int u2, int v2,
                     unsigned top, unsigned bottom, int linear)
