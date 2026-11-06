@@ -2,8 +2,8 @@
 // the PC's screen and encode MPEG-2 with I and P pictures only, served as an MPEG program stream over HTTP; the PS2
 // decodes it on the IPU and shows every picture as soon as it is decoded; its pad goes back over UDP, where link.py
 // turns it into a virtual Xbox 360 controller (ViGEm). Latency is the gate: docs/phase19-results.md.
-// - mass0:/orbit/config.ini [link] servidor = <PC IP>, aspecto = 16:9 (the PC screen's shape; the stream is
-//   anamorphic), atraso_kb; [red] and [ui] idioma as the launcher
+// - mass0:/nuld/config.ini (orbit/ until the launcher's v1.1) [link] servidor = <PC IP>, aspecto = 16:9 (the PC
+//   screen's shape; the stream is anamorphic), atraso_kb; [red] and [ui] idioma as the launcher
 // - video: http://<servidor>:8099/ -> http.c -> mpegps.c -> ring -> IPU through ps2sdk libmpeg (RGBA32 pictures in
 //   16x16 macroblocks) -> gfx_mb32 (DMA to the GS, bilinear, fitted into 1280x720). orbit-jellyfin's jfplay.c without
 //   its prebuffer, audio and audio clock: a picture is drawn when it is decoded; with more than atraso_kb waiting in
@@ -604,7 +604,7 @@ int main(void)
 	screen("ORBIT Link", L("Cargando módulos...", "Loading modules..."));
 	if (!iop_init()) { screen("ORBIT Link", L("Sin USB (mass0:)", "No USB (mass0:)")); SleepThread(); }
 	audsrv_init();
-	ini_load(&cfg, "mass0:/orbit/config.ini");
+	if (!ini_load(&cfg, "mass0:/nuld/config.ini")) ini_load(&cfg, "mass0:/orbit/config.ini"); // the launcher's; orbit/ until v1.1
 	lang_en = !strcasecmp(ini_get(&cfg, "ui", "idioma", "es"), "en"); // the launcher's [ui] idioma
 	snprintf(host, sizeof(host), "%s", ini_get(&cfg, "link", "servidor", ""));
 	if (sscanf(ini_get(&cfg, "link", "aspecto", "16:9"), "%d:%d", &asp_w, &asp_h) != 2 || asp_w <= 0 || asp_h <= 0) asp_w = 16, asp_h = 9;
@@ -612,8 +612,8 @@ int main(void)
 	if (behind_kb < 4) behind_kb = 4;
 	logf_("link: start, servidor %s, aspecto %d:%d, atraso %d KB\n", host, asp_w, asp_h, behind_kb);
 	if (!*host) {
-		screen("ORBIT Link", L("Falta [link] servidor = <IP de la PC> en mass0:/orbit/config.ini",
-		                       "Missing [link] servidor = <PC IP> in mass0:/orbit/config.ini"));
+		screen("ORBIT Link", L("Falta [link] servidor = <IP de la PC> en mass0:/nuld/config.ini",
+		                       "Missing [link] servidor = <PC IP> in mass0:/nuld/config.ini"));
 		SleepThread();
 	}
 	screen("ORBIT Link", L("Conectando a la red...", "Connecting to the network..."));

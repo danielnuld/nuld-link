@@ -31,7 +31,7 @@ wsl bash build.sh test     # host selftests of the shared pieces
 ## Install
 
 Copy `link.elf` and `title.cfg` to `mass0:/APPS/Link/`: the launcher lists it under APPS. It also runs on its own
-from uLaunchELF. Add to the launcher's `mass0:/orbit/config.ini`:
+from uLaunchELF. Add to the launcher's `mass0:/nuld/config.ini` (`mass0:/orbit/` with launchers up to v1.1):
 
 ```
 [red]
