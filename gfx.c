@@ -116,7 +116,7 @@ int main(void)
 	assert(gfx_text_width(f, "AB") == f->g['A' - 32].adv + f->g['B' - 32].adv + 4); // between glyphs only
 	tracking = 0;
 	assert(gfx_text_width(f, "t\xC3\xA9") == f->g['t' - 32].adv + f->g[96].adv && f->g[96].w > 0); // é baked
-	assert(gfx_font_logo.g['O' - 32].w > 0 && gfx_font_logo.g['A' - 32].w == 0); // logo: "ORBIT" only
+	assert(gfx_font_logo.g['N' - 32].w > 0 && gfx_font_logo.g['A' - 32].w == 0); // logo: "NULD" only
 	s = "\xC3\xA8\xC5\x93";                              // e-grave, oe: the ui font bakes both
 	int eg = next_glyph(f, &s), oe = next_glyph(f, &s);
 	assert(eg >= 95 && oe >= 95 && f->g[eg].w > 0 && f->g[oe].w > 0 && !*s);
