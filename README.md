@@ -3,7 +3,7 @@
 The PlayStation 2 as a streaming client of your PC: the PC captures its screen and encodes it, the PS2 decodes it on
 its IPU and shows it on the TV, and the PS2 controller comes back as a virtual Xbox 360 pad. Steam, PCSX2, any
 emulator, on the TV the PS2 is plugged into, with the PS2 pad. A companion of the
-[ORBIT launcher](https://github.com/danielnuld/ps2-launcher), built on [ORBIT Jellyfin](https://github.com/danielnuld/orbit-jellyfin)'s player.
+[ORBIT launcher](https://github.com/danielnuld/ps2-launcher), built on [NULD Jellyfin](https://github.com/danielnuld/nuld-jellyfin)'s player.
 
 **Phase 19 spike (go / no-go): latency.** Video only, 512x448 at 30 fps; the gate is in `docs/phase19-results.md`.
 
