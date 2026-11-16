@@ -33,6 +33,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -127,8 +128,24 @@ def gfn_games():
         name = re.sub(r"(?i)^NVIDIA\s+|\s+(on|en)\s+GeForce NOW$", "", lnk.stem)
         if "geforce now" in lnk.stem.lower() and name.lower() not in seen:
             seen.add(name.lower())
-            out.append(("GFN", name, str(lnk), None))
+            out.append(("GFN", name, str(lnk), None if name.lower() == "geforce now" else steam_cover(name)))
     return out
+
+
+found = {}  # steam_cover: by name, for this run
+
+
+def steam_cover(name):
+    """A game's tall cover from Steam's shop by its name (the first match of its search), or None."""
+    if name not in found:
+        try:
+            q = urllib.request.urlopen("https://store.steampowered.com/api/storesearch/?cc=us&l=en&term=" +
+                                       urllib.parse.quote(name), timeout=8).read()
+            items = json.loads(q).get("items", [])
+            found[name] = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{items[0]['id']}/library_600x900.jpg" if items else None
+        except (OSError, ValueError, KeyError):
+            return None  # asked again at the next catalog
+    return found[name]
 
 
 COVER_W, COVER_H = 256, 368 # cover.h COVER_W x COVER_H, as the launcher's big cover
