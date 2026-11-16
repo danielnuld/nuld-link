@@ -222,14 +222,6 @@ static int leave_combo(unsigned b) { return (b & (COMBO | PAD_START)) == (COMBO 
 static void player_says(const char *line) // the player's line, and what the network had to ask for again so far
 {
 	int n = strlen(line);
-	// a line every 5 s: two with the same count of pictures shown and the PC has gone (its server stopped, the
-	// network fell): back to the menu instead of the last picture for ever (console, 2026-11-16)
-	static int last = -1, same;
-	int shown;
-	if (sscanf(line, "nuld-av live: %d shown", &shown) == 1) {
-		same = shown == last ? same + 1 : 0, last = shown;
-		if (same >= 2) same = 0, last = -1, nav_stop();
-	} else last = -1, same = 0; // the first line of a stream
 	logf_("%.*s; %u datagrams sent again so far, audio: %d ms free in audsrv, %d cuts\n", n && line[n - 1] == '\n' ? n - 1 : n, line,
 	      nav_net_gaps(), a_free_ms, a_dropped);
 }
