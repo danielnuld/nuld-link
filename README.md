@@ -9,8 +9,10 @@ emulator, on the TV the PS2 is plugged into, with the PS2 pad. A companion of th
 game mode, 2026-11-15), with [nuld-av](https://github.com/danielnuld/nuld-av). The first version (512x448 through
 ps2sdk's libmpeg over TCP) is in `docs/phase19-results.md` and on the `master` branch.
 
-**To just use it:** download `NULD-Link-2.0.zip` from [Releases](https://github.com/danielnuld/nuld-link/releases)
-and follow its `README.txt` (the PS2's USB stick, the PC's set-up, and what to do when something fails).
+**To just use it:** the [website](https://danielnuld.github.io/nuld-link/) has the download and the
+[manual](https://danielnuld.github.io/nuld-link/manual.html) (the PS2's USB stick, the PC's set-up, and what to do when
+something fails). The zip in [Releases](https://github.com/danielnuld/nuld-link/releases) carries the same steps as
+`README.txt`.
 
 ## How it works
 

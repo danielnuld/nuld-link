@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NULD Link manual</title>
+<meta name="description" content="How to set up NULD Link: the PS2's USB stick, the PC, the menu, the buttons, config.ini, the server's options and what to do when something fails.">
+<meta name="theme-color" content="#E6E8EC">
+<link rel="preload" href="fonts/archivo.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="site.css">
+<script src="release.js" defer></script>
+</head>
+<body class="paper">
+<div class="wrap">
+  <nav class="runhead" aria-label="Manual">
+    <a href="./">NULD Link instruction manual, <span data-version="version {v}">version 2.0</span></a>
+    <a href="#need">1 What you need</a>
+    <a href="#usb">2 The USB stick</a>
+    <a href="#pc">3 The PC</a>
+    <a href="#play">4 Playing</a>
+    <a href="#help">8 Troubleshooting</a>
+  </nav>
+
+  <header class="cover">
+    <div>
+      <div class="logo">
+        <svg width="88" height="88" viewBox="0 0 88 88" aria-hidden="true"><circle cx="44" cy="44" r="36" fill="none" stroke="#06070A" stroke-width="11"/><line x1="3" y1="85" x2="85" y2="3" stroke="#06070A" stroke-width="11"/></svg>
+        <span>NULD Link</span>
+      </div>
+      <h1>The PlayStation&nbsp;2 as the screen and the controller of your <span class="mark">PC</span>.</h1>
+    </div>
+    <p>How to set it up, from an empty USB stick to a game on the TV. It takes about ten minutes. <br><br><a class="btn ink" href="https://github.com/danielnuld/nuld-link/releases/latest" data-zip data-version="Download v{v}">Download</a></p>
+    <figure class="fig">
+      <div class="frame"><img src="img/menu-desktop.jpg" alt="NULD Link's menu on the PS2: the Desktop card and the covers of the PC's games" width="1280" height="720" style="display: block; width: 100%; height: auto"></div>
+      <figcaption>Fig. 1, the menu on the PS2: the PC's desktop first, then its games.</figcaption>
+    </figure>
+  </header>
+
+  <section class="chapter" id="need">
+    <header><b>1</b><h2>What you need</h2></header>
+    <div>
+      <div class="scroll"><table>
+        <tbody>
+          <tr><td><b>A PS2 that runs homebrew</b></td><td>From a USB stick, with FreeMcBoot or similar. It needs a network port: every slim has one, a fat needs the network adapter.</td></tr>
+          <tr><td><b>A TV that takes 720p</b></td><td>From the PS2: a component cable, or a component to HDMI adapter. Link only outputs 1280×720.</td></tr>
+          <tr><td><b>A network cable</b></td><td>From the PS2 to your router. The PC should be on a cable too; on Wi-Fi it works with more stutter.</td></tr>
+          <tr><td><b>A Windows 10 or 11 PC</b></td><td>On the same network. By default it captures and encodes on an Intel graphics chip (Quick Sync); without one, see <a href="#options">chapter 7</a>.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <section class="chapter" id="usb">
+    <header><b>2</b><h2>The USB stick</h2></header>
+    <div>
+      <p>Copy what is inside the zip's <code>PS2</code> folder to the root of a FAT32 stick:</p>
+<pre>USB root
+├── APPS/Link/link.elf     the program
+├── APPS/Link/title.cfg    its name, for launchers that list APPS/
+└── nuld/config.ini        where your PC is</pre>
+      <p>The PS2 has to know your PC's address. On the PC, open a terminal, type <code>ipconfig</code> and read the "IPv4 Address" (like 192.168.1.23). Open <code>nuld/config.ini</code> with Notepad and put it after <code>servidor =</code>.</p>
+<pre>[red]
+ip = dhcp
+
+[link]
+servidor = 192.168.1.23   ; your PC's address, not a name
+directo = 0               ; 1: straight to the desktop, the menu only after it ends</pre>
+      <p>If you already use the <a href="https://danielnuld.github.io/nuld/">NULD launcher</a>, keep its own <code>nuld/config.ini</code> and add the <code>[link]</code> section to it.</p>
+    </div>
+  </section>
+
+  <section class="chapter" id="pc">
+    <header><b>3</b><h2>The PC, once</h2></header>
+    <div>
+      <ol>
+        <li><b>Python 3</b>, from <a href="https://www.python.org/downloads/">python.org</a>. Tick "Add python.exe to PATH" in the installer's first window.</li>
+        <li><b>ffmpeg</b>. In a terminal: <code>winget install Gyan.FFmpeg</code>, then close the terminal and open it again.</li>
+        <li><b>ViGEmBus</b>, the virtual controller driver, from <a href="https://github.com/nefarius/ViGEmBus/releases">its releases page</a>. It is what turns the PS2 controller into an Xbox 360 controller on the PC.</li>
+        <li>Double-click <code>PC\install-packages.bat</code>: it installs the Python packages (vgamepad, soundcard, numpy, pillow).</li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="chapter" id="play">
+    <header><b>4</b><h2>Playing</h2></header>
+    <div>
+      <p>On the PC, double-click <code>PC\start.bat</code> and leave its window open. The first time, Windows asks about the firewall: allow Python on private networks.</p>
+      <p>On the PS2, run <code>mass0:/APPS/Link/link.elf</code>: from the NULD launcher's APPS list, or with uLaunchELF. The menu shows what the PC has:</p>
+      <div class="scroll"><table>
+        <tbody>
+          <tr><td><b>Desktop</b></td><td>The PC's screen as it is. Start anything on the PC and play it from the PS2.</td></tr>
+          <tr><td><b>EPIC</b>, <b>STEAM</b></td><td>The games installed on the PC from those launchers.</td></tr>
+          <tr><td><b>GFN</b></td><td>Your GeForce NOW library. Open the GeForce NOW app on the PC once, so it knows your library; games you add later appear after you open it again.</td></tr>
+        </tbody>
+      </table></div>
+      <p>Pick one with the d-pad and press ✕: it starts on the PC, comes to the front, and its picture and sound arrive on the TV. Put the TV in game mode: its own processing is most of the delay.</p>
+    </div>
+  </section>
+
+  <section class="chapter" id="buttons">
+    <header><b>5</b><h2>Buttons</h2></header>
+    <div>
+      <div class="scroll"><table>
+        <tbody>
+          <tr><td><b>In the menu</b></td><td>D-pad left and right: choose. ✕: start.</td></tr>
+          <tr><td><b>While playing</b></td><td>Everything goes to the PC as an Xbox 360 controller: ✕ A, ○ B, □ X, △ Y, L1/R1 the shoulders, L2/R2 the triggers, SELECT Back, START Start, both sticks with L3/R3, and the d-pad.</td></tr>
+          <tr><td><b>L1+L2+R1+R2 + △</b></td><td>Back to the menu.</td></tr>
+          <tr><td><b>L1+L2+R1+R2 + START</b></td><td>Leave Link.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <section class="chapter" id="how">
+    <header><b>6</b><h2>How it works</h2></header>
+    <div>
+      <p>The PC captures its screen, scales it to 1280×720 and encodes it as MPEG-2 on the graphics chip. Each picture is repacked, as it leaves the encoder, into PS2V: a format made for the PS2's video chip, from <a href="https://github.com/danielnuld/nuld-av">nuld-av</a>. It goes out at once by UDP, and what gets lost is sent again.</p>
+      <p>On the PS2 the stream is taken straight from the Ethernet driver, decoded by the console's video chip in 8 to 19 ms a picture, and shown as soon as it is ready. The controller goes the other way, 60 times a second.</p>
+      <p>If the PS2 falls two thirds of a second behind, the PC drops what is waiting and starts the capture again: a jolt, instead of a delay that grows. If no picture arrives for 10 seconds, the PS2 goes back to its menu.</p>
+    </div>
+  </section>
+
+  <section class="chapter" id="options">
+    <header><b>7</b><h2>The server's options</h2></header>
+    <div>
+      <p>Add them after <code>start.bat</code> in a terminal.</p>
+      <div class="scroll"><table>
+        <tbody>
+          <tr><td><code>--grab gdigrab --encoder mpeg2video</code></td><td>Without Intel graphics: capture and encoding on the processor. It needs a fast one.</td></tr>
+          <tr><td><code>--rate 16M</code></td><td>More bits for the picture (the default is 12M; the PS2's network takes about 20M).</td></tr>
+          <tr><td><code>--title "Window name"</code></td><td>One window instead of the whole desktop (with <code>--grab gdigrab</code>).</td></tr>
+          <tr><td><code>--no-audio</code></td><td>Picture only.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <section class="chapter" id="help" style="border-bottom: 0">
+    <header><b>8</b><h2>Troubleshooting</h2></header>
+    <div>
+      <ul>
+        <li><b>"Waiting for the PC"</b>: the address in <code>config.ini</code> is not the PC's, <code>start.bat</code> is not running, or the firewall blocked Python (allow python.exe on private networks).</li>
+        <li><b>Picture, but the controller does nothing</b>: ViGEmBus is not installed, or <code>install-packages.bat</code> failed.</li>
+        <li><b>No sound</b>: run <code>install-packages.bat</code> again; the sound needs its "soundcard" package.</li>
+        <li><b>Stutter with a heavy game</b>: the PC is busy running it. Cap the game at 30 frames per second, and put the PC on a network cable.</li>
+        <li><b>A game opens the Microsoft Store asking for "ms-gamingoverlay"</b>: Windows is calling the Xbox Game Bar and it is not installed. Turn off Game Bar's recording in Windows' settings.</li>
+        <li><b>A black or frozen picture when a game starts</b>: use borderless full screen in the game instead of exclusive full screen.</li>
+        <li><b>Logs</b>: the PS2 writes <code>mass0:/link.txt</code>; the PC's window says what it is doing.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer class="site">
+    <span>NULD Link is free software under GPL-3.0, built on nuld-av (MIT) and ps2sdk.</span>
+    <span>PlayStation is a trademark of Sony Interactive Entertainment. NULD Link is not affiliated with Sony, NVIDIA, Epic Games or Valve.</span>
+  </footer>
+</div>
+</body>
+</html>

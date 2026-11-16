@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NULD Link, your PC and cloud games on a PlayStation 2</title>
+<meta name="description" content="NULD Link turns a real PlayStation 2 into the screen and the controller of your PC: 720p at 30 frames per second with sound, 70 to 100 ms behind, with games from Epic, Steam and GeForce NOW in the PS2's own menu.">
+<meta property="og:title" content="NULD Link, your PC and cloud games on a PlayStation 2">
+<meta property="og:description" content="720p at 30 frames per second, with sound and the PS2 controller, on a real PlayStation 2.">
+<meta property="og:image" content="https://danielnuld.github.io/nuld-link/img/menu-cyberpunk.jpg">
+<meta name="theme-color" content="#06070A">
+<link rel="preload" href="fonts/archivo.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="site.css">
+<script src="gallery.js" defer></script>
+<script src="release.js" defer></script>
+</head>
+<body>
+<nav class="nav" aria-label="Main">
+  <div class="wrap">
+    <a class="brand" href="./" aria-current="page">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10.5" fill="none" stroke="#E6E8EC" stroke-width="3"/><line x1="2" y1="24" x2="24" y2="2" stroke="#C8FF2E" stroke-width="3"/></svg>
+      <span>NULD Link</span>
+    </a>
+    <a href="#features">Features</a>
+    <a href="#screens">Screens</a>
+    <a href="manual.html">Manual</a>
+    <a href="https://github.com/danielnuld/nuld-link">Source</a>
+    <a class="btn solid small" href="https://github.com/danielnuld/nuld-link/releases/latest" data-zip><span data-zip-name>Download</span></a>
+  </div>
+</nav>
+
+<main>
+  <header class="wrap hero">
+    <div class="hero-top">
+      <h1>Your PC and cloud games, on a PlayStation&nbsp;2.</h1>
+      <div>
+        <p>The game runs on your PC, or in the cloud through it. The PS2 is the screen and the controller: 1280×720 at 30 frames per second, with sound, 70 to 100 ms behind the PC's own screen.</p>
+        <div class="btns">
+          <a class="btn solid" href="https://github.com/danielnuld/nuld-link/releases/latest" data-zip data-version="Download v{v}">Download</a>
+          <a class="btn" href="manual.html">Read the manual</a>
+        </div>
+      </div>
+    </div>
+    <figure style="margin: 0">
+      <div class="screen">
+        <img src="img/menu-cyberpunk.jpg" alt="NULD Link's menu on the PS2: Cyberpunk 2077 selected, with the covers of Fortnite and Sonic Mania beside it" width="1280" height="720" style="display: block; width: 100%; height: auto">
+      </div>
+      <figcaption class="caption">
+        <span>The menu, recorded from the PS2's video output.</span>
+        <span>Free software under GPL-3.0.</span>
+      </figcaption>
+    </figure>
+  </header>
+
+  <section id="features" class="wrap">
+    <h2>What it does</h2>
+    <p class="lead">The numbers were measured on a slim PS2 (SCPH-75001) over component at 720p, with the TV in game mode.</p>
+    <div class="scroll">
+      <table class="rules">
+        <tbody>
+          <tr><td class="n">01</td><td class="name">720p at 30 frames per second</td><td class="text">Decoded by the PS2's own video chip in 8 to 19 ms a picture, with <a href="https://github.com/danielnuld/nuld-av">nuld-av</a>: a video format made for this console.</td></tr>
+          <tr><td class="n">02</td><td class="name">70 to 100 ms of delay</td><td class="text">From the PC's screen to the TV, measured with a stopwatch on both. Every picture is shown as soon as it is decoded: there is no buffer.</td></tr>
+          <tr><td class="n">03</td><td class="name">Your games in the PS2's menu</td><td class="text">The PC's installed Epic Games and Steam games and your GeForce NOW library, with their covers. Pick one on the PS2 and it starts on the PC.</td></tr>
+          <tr><td class="n">04</td><td class="name">The PS2 controller</td><td class="text">Read 60 times a second and handed to the PC as an Xbox 360 controller, sticks and triggers included.</td></tr>
+          <tr><td class="n">05</td><td class="name">Sound</td><td class="text">What Windows plays, in step with the picture.</td></tr>
+          <tr><td class="n">06</td><td class="name">The desktop too</td><td class="text">The first card of the menu shows the PC's screen as it is: an emulator, a browser, anything.</td></tr>
+          <tr><td class="n">07</td><td class="name">A network path of its own</td><td class="text">The stream is taken straight from the PS2's Ethernet driver: 2.5 MB/s where the console's network stack gives 1.5.</td></tr>
+          <tr><td class="n">08</td><td class="name">It finds its way back</td><td class="text">If the capture stops (a game taking the screen, a Windows prompt) it starts again; if the PC goes away, the PS2 returns to its menu.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="screens">
+    <div class="wrap gallery-head">
+      <h2>Screens</h2>
+      <span class="count">Recorded from the PS2's video output at 1280×720. Select one to see it full size.</span>
+      <div class="btns">
+        <button class="btn small" type="button" data-strip-step="-1" aria-label="Previous screens">Previous</button>
+        <button class="btn small" type="button" data-strip-step="1" aria-label="Next screens">Next</button>
+      </div>
+    </div>
+    <div class="strip" data-strip tabindex="0" aria-label="Screenshots, scrolls sideways">
+      <figure><button type="button"><img src="img/menu-desktop.jpg" alt="The menu with the Desktop card selected and the covers of Among Us, Cuphead and Cyberpunk 2077 beside it" width="1280" height="720" loading="lazy"></button><figcaption><span class="mono">pc</span>The menu: the desktop first, then the PC's games.</figcaption></figure>
+      <figure><button type="button"><img src="img/menu-cuphead.jpg" alt="The menu with Cuphead selected, tagged GFN" width="1280" height="720" loading="lazy"></button><figcaption><span class="mono">gfn</span>A game from the GeForce NOW library, with its source tag.</figcaption></figure>
+      <figure><button type="button"><img src="img/cyberpunk-drive.jpg" alt="Cyberpunk 2077 on the PS2: driving through Night City" width="1280" height="720" loading="lazy"></button><figcaption><span class="mono">720p</span>Cyberpunk 2077, through GeForce NOW and the PC.</figcaption></figure>
+      <figure><button type="button"><img src="img/cyberpunk-fight.jpg" alt="Cyberpunk 2077 on the PS2: a firefight with an explosion" width="1280" height="720" loading="lazy"></button><figcaption><span class="mono">30 fps</span>A firefight: the hardest kind of picture for the stream.</figcaption></figure>
+      <figure><button type="button"><img src="img/cuphead.jpg" alt="Cuphead on the PS2: the first run and gun level" width="1280" height="720" loading="lazy"></button><figcaption><span class="mono">pad</span>Cuphead, played with the PS2 controller.</figcaption></figure>
+    </div>
+  </section>
+
+  <section id="download" class="wrap">
+    <h2>Download</h2>
+    <p class="lead">One zip: a folder for the PS2's USB stick and a folder for the PC.</p>
+    <div class="scroll">
+      <table class="files">
+        <tbody>
+          <tr><td><a class="acid" href="https://github.com/danielnuld/nuld-link/releases/latest" data-zip><span data-zip-name>NULD Link zip</span></a></td><td>link.elf and its config.ini for the PS2; the server, start.bat and the written steps for the PC</td><td data-zip-size></td></tr>
+          <tr><td><a href="https://github.com/danielnuld/nuld-link/releases">all releases</a></td><td>Release notes</td><td></td></tr>
+          <tr><td><a href="https://github.com/danielnuld/nuld-av">nuld-av</a></td><td>The video library underneath, MIT: 720p video with sound for any PS2 project</td><td></td></tr>
+          <tr><td><a href="https://danielnuld.github.io/nuld/">NULD</a></td><td>Optional: the game launcher for the PS2 that lists Link under APPS</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="start" class="wrap">
+    <h2>Four steps</h2>
+    <p class="lead">You need a PS2 that runs homebrew (FreeMcBoot or similar) with a network port, a TV that takes 720p from it, and a Windows PC on the same network. The <a href="manual.html">manual</a> has the rest.</p>
+    <ol class="steps">
+      <li>Copy the zip's <code>PS2</code> folder contents to a FAT32 USB stick and put your PC's address in <code>nuld/config.ini</code>.</li>
+      <li>On the PC, once: Python, ffmpeg, the ViGEmBus controller driver, and <code>install-packages.bat</code>.</li>
+      <li>On the PC, run <code>start.bat</code> and allow it through the firewall.</li>
+      <li>On the PS2, run <code>APPS/Link/link.elf</code>, pick a game and press ✕.</li>
+    </ol>
+  </section>
+</main>
+
+<footer class="wrap site">
+  <span>Built on <a href="https://github.com/danielnuld/nuld-av">nuld-av</a> (MIT) and <a href="https://github.com/ps2dev/ps2sdk">ps2sdk</a>. The virtual controller is <a href="https://github.com/nefarius/ViGEmBus">ViGEmBus</a>.</span>
+  <span>PlayStation is a trademark of Sony Interactive Entertainment. NULD Link is not affiliated with Sony, NVIDIA, Epic Games or Valve.</span>
+</footer>
+
+<dialog class="viewer" data-viewer aria-label="Screenshot viewer">
+  <header><span class="count" data-count></span><button class="btn small" type="button" data-close>Close</button></header>
+  <div class="stage"><img alt=""></div>
+  <footer><p data-cap></p><button class="btn small" type="button" data-go="-1">Previous</button><button class="btn small" type="button" data-go="1">Next</button></footer>
+</dialog>
+</body>
+</html>
