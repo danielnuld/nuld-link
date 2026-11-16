@@ -1,49 +1,44 @@
-// ORBIT Link (phase 19, go / no-go spike): the PS2 as a streaming client of the PC. server/link.py has ffmpeg capture
-// the PC's screen and encode MPEG-2 with I and P pictures only, served as an MPEG program stream over HTTP; the PS2
-// decodes it on the IPU and shows every picture as soon as it is decoded; its pad goes back over UDP, where link.py
-// turns it into a virtual Xbox 360 controller (ViGEm). Latency is the gate: docs/phase19-results.md.
-// - mass0:/nuld/config.ini (orbit/ until the launcher's v1.1) [link] servidor = <PC IP>, aspecto = 16:9 (the PC
-//   screen's shape; the stream is anamorphic), atraso_kb; [red] and [ui] idioma as the launcher
-// - video: http://<servidor>:8099/ -> http.c -> mpegps.c -> ring -> IPU through ps2sdk libmpeg (RGBA32 pictures in
-//   16x16 macroblocks) -> gfx_mb32 (DMA to the GS, bilinear, fitted into 1280x720). orbit-jellyfin's jfplay.c without
-//   its prebuffer, audio and audio clock: a picture is drawn when it is decoded; with more than atraso_kb waiting in
-//   the ring it is decoded (the next P pictures need it) and not drawn
-// - audio: the PC's sound as MP2 over UDP 8097, a frame per datagram (in the program stream, ffmpeg's muxer held the
-//   video for the audio: bursts, +150 ms) -> ring -> libmad -> audsrv (jfplay's audio thread without its
-//   clock). audsrv reads its ~106 ms ring at 48 kHz whether it holds data or not (overtaken, it replays stale
-//   samples), so it is kept full and sets the pace; over AUDIO_MS of MP2 waiting here, one cut to the newest
-// - pad: 16 bytes at ~60 Hz to UDP <servidor>:8098 (buttons and both sticks), from its own thread
-// - menu first: the PC's desktop, then the games link.py finds installed (Epic, Steam) with their covers, in a row as
-//   jfplay's browse screen; X launches the game on the PC (/launch/<n>) and starts the stream
-// - L1+L2+R1+R2 + SELECT toggles the gate numbers on screen; L1+L2+R1+R2 + TRIANGLE back to the menu;
-//   L1+L2+R1+R2 + START leaves (Exit: the OSD, and FMCB's autoboot brings ORBIT back)
-// - every 5 s a line goes to mass0:/link.txt (and the EE serial port): pictures decoded / shown / skipped, decode ms,
-//   network KB/s, ring KB, pad packets/s
+// NULD Link: the PS2 as a streaming client of the PC. server/link.py captures the PC's screen, encodes it and sends
+// it as PS2V (nuld-av: MPEG-2 pictures repacked for the IPU) by the network's fast path; the PS2 shows 1280x720 at 30
+// pictures a second, each as soon as it is decoded, and its pad goes back over UDP, where link.py turns it into a
+// virtual Xbox 360 controller (ViGEm). 70-100 ms from the PC's screen to the TV on a SCPH-75001 (stopwatch photos,
+// 2026-11-15); before nuld-av it was 512x448 through ps2sdk's libmpeg over TCP.
+// - mass0:/nuld/config.ini (orbit/ until the launcher's v1.1) [link] servidor = <PC IP> (an address, not a name);
+//   [red] and [ui] idioma as the launcher
+// - video and sound: nav_net_open + nav_play_live (nuld-av). The player takes the GS, the IPU and this thread while a
+//   stream plays; the sound comes in the same stream as MP2 frames (nav_live_audio) -> ring -> libmad -> audsrv.
+//   audsrv reads its ~106 ms ring at 48 kHz whether it holds data or not (overtaken, it replays stale samples), so
+//   it is kept full and sets the pace; over AUDIO_MS of MP2 waiting here, one cut to the newest
+// - pad: 16 bytes at ~60 Hz to UDP <servidor>:8098 (buttons and both sticks), from its own thread, which also
+//   watches for the combos while a stream plays (the main thread is the player's then)
+// - menu first: the PC's desktop, then the games link.py finds installed (Epic, Steam) with their covers, in a row;
+//   X launches the game on the PC (/launch/<n>) and starts the stream. The menu's requests are HTTP/1.0 GETs through
+//   nuld-av's netring (nav_net_tcp): TCP/IP runs on the IOP, the EE has no stack of its own
+// - L1+L2+R1+R2 + TRIANGLE back to the menu; L1+L2+R1+R2 + START leaves (Exit: the OSD, and FMCB's autoboot brings
+//   NULD back)
+// - every 5 s the player's line goes to mass0:/link.txt (and the EE serial port)
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <math.h>
 #include <malloc.h>
 #include <time.h>
 #include <unistd.h>
 #include <kernel.h>
 #include <tamtypes.h>
-#include <dma.h>
 #include <libpad.h>
-#include <libmpeg.h>
 #include <audsrv.h>
 #include <mad.h>
 #include <sio.h>
-#include <netdb.h>
-#include <ps2ip.h>
+#include <ps2ips.h>
+#include <nuldav.h>
 #include "lang.h"
 #include "gfx.h"
 #include "iop.h"
 #include "ini.h"
 #include "net.h"
-#include "http.h"
-#include "mpegps.h"
 #include "ui_data.h"
 #include "splash.h"
 
@@ -52,7 +47,7 @@
 #define LOG "mass0:/link.txt"
 #define VIDEO_PORT 8099
 #define PAD_PORT 8098
-#define AUDIO_PORT 8097
+#define FAST_KBS 2600 // what the fast path may send, KB/s: a SCPH-75001 took this without trouble (nuld-av)
 #define COMBO (PAD_L1 | PAD_L2 | PAD_R1 | PAD_R2)
 #define AUDIO_MS 150 // MP2 waiting before audsrv; ponytail: fixed, an [link] key if the console wants another
 int lang_en; // lang.h
@@ -71,86 +66,25 @@ static void logf_(const char *fmt, ...)
 	if (f) fputs(b, f), fclose(f);
 }
 
-// ---- ring: one writer (network thread), one reader (libmpeg); size a power of two ----
+// ---- ring: one writer (the player's thread), one reader (the audio thread); size a power of two ----
 typedef struct { u8 *b; int size; volatile unsigned rd, wr; } ring; // free-running counters: differences wrap safely
 static int ring_used(ring *r) { return (int)(r->wr - r->rd); }
-static int ring_put(ring *r, const u8 *p, int n, volatile int *stop) // blocks while full
+static void ring_put(ring *r, const u8 *p, int n) // the caller made sure it fits
 {
-	while (n > 0 && !*stop) {
-		int room = r->size - ring_used(r);
-		if (!room) { usleep(2000); continue; }
-		int k = n < room ? n : room, o = r->wr & (r->size - 1), first = r->size - o < k ? r->size - o : k;
-		memcpy(r->b + o, p, first), memcpy(r->b, p + first, k - first);
-		__asm__ volatile("" ::: "memory");
-		r->wr += k, p += k, n -= k;
-	}
-	return !*stop;
+	int o = r->wr & (r->size - 1), first = r->size - o < n ? r->size - o : n;
+	memcpy(r->b + o, p, first), memcpy(r->b, p + first, n - first);
+	__asm__ volatile("" ::: "memory");
+	r->wr += n;
 }
 
-static ring vring, aring;
+static ring aring;
 static volatile int pad_live; // the pad goes to the PC only while streaming: not the menu's presses
-static volatile int net_eof, stop, leave, net_kb, net_total_kb, pics, pad_sent, show_osd, main_at; // main_at: 1 decode, 2 draw
-static int behind_kb = 48, pad_rate; // [link] atraso_kb: more than this waiting in the ring = behind, pictures are not drawn
+static volatile int stop, leave, pad_sent;
+static unsigned host_ip;      // [link] servidor, network order
 
-static void on_video(void *c, const u8 *p, int n, long long t)
+static void on_audio(const unsigned char *p, int n) // the stream's MP2 frames, on the player's thread; full: dropped
 {
-	// drop sequence_end_code (00 00 01 B7): libmpeg hung on it instead of returning 0 (orbit-jellyfin, PCSX2)
-	for (int i = 0; i + 4 <= n; i++)
-		if (!p[i] && !p[i + 1] && p[i + 2] == 1 && p[i + 3] == 0xB7) {
-			if (i) on_video(c, p, i, t);
-			p += i + 4, n -= i + 4, i = -1, t = -1;
-		}
-	(void)c;
-	(void)t; // no PTS: every picture is shown when it is decoded
-	ring_put(&vring, p, n, &stop);
-}
-static void on_audio(void *c, const u8 *p, int n, long long t) // none in the program stream: the audio comes by UDP
-{
-	(void)c;
-	(void)p;
-	(void)n;
-	(void)t;
-}
-
-// ---- audio in: MP2 datagrams from link.py -> aring, while a stream plays (a_live). The pad thread sends "OLA1" from
-// this socket once a second: link.py answers to where it comes from (PCSX2's Sockets network, NATs) ----
-static volatile int a_live, a_sock = -1;
-static struct sockaddr_in audio_to;
-static u8 arx_stack[0x4000] __attribute__((aligned(16)));
-static void audio_rx(void *arg) // for the whole run: blocks in recvfrom, nothing to stop
-{
-	(void)arg;
-	static u8 b[2048];
-	int s = socket(AF_INET, SOCK_DGRAM, 0);
-	struct sockaddr_in at = {0};
-	at.sin_family = AF_INET, at.sin_port = htons(AUDIO_PORT), at.sin_addr.s_addr = htonl(INADDR_ANY);
-	if (s < 0 || bind(s, (struct sockaddr *)&at, sizeof(at)) < 0) { logf_("link: no audio socket\n"); ExitThread(); }
-	a_sock = s;
-	for (;;) {
-		int n = recvfrom(s, b, sizeof(b), 0, NULL, NULL);
-		if (n > 0 && a_live && ring_used(&aring) + n <= aring.size) ring_put(&aring, b, n, &stop); // full: dropped
-	}
-}
-
-static http_stream hs;
-static ps_demux dmx;
-static u8 net_stack[0x8000] __attribute__((aligned(16)));
-static void net_thread(void *arg) // HTTP -> demuxer -> ring
-{
-	(void)arg;
-	static u8 buf[32 << 10];
-	int n;
-	clock_t c0 = clock();
-	long long total = 0;
-	while (!stop && (n = http_read(&hs, buf, sizeof(buf))) > 0) {
-		if (ps_feed(&dmx, buf, n) < 0) { logf_("link: not a program stream\n"); break; }
-		total += n;
-		net_total_kb = (int)(total >> 10);
-		int ms = (int)((long long)(clock() - c0) * 1000 / CLOCKS_PER_SEC);
-		if (ms > 0) net_kb = (int)(total * 1000 / 1024 / ms);
-	}
-	net_eof = 1;
-	ExitThread();
+	if (ring_used(&aring) + n <= aring.size) ring_put(&aring, p, n);
 }
 
 // ---- pad -> PC: 16 bytes at ~60 Hz to UDP 8098 (server/link.py PAD) ----
@@ -168,8 +102,10 @@ static void pad_thread(void *arg)
 		if (pad_live && s >= 0 && padRead(0, 0, &b)) {
 			k.buttons = 0xffff ^ b.btns; // pressed = 1, libpad's PAD_* bits
 			k.lx = b.ljoy_h, k.ly = b.ljoy_v, k.rx = b.rjoy_h, k.ry = b.rjoy_v;
+			// the combos, here while a stream plays: the main thread is inside the player
+			if ((k.buttons & (COMBO | PAD_START)) == (COMBO | PAD_START)) leave = 1, nav_stop();
+			else if ((k.buttons & (COMBO | PAD_TRIANGLE)) == (COMBO | PAD_TRIANGLE)) nav_stop(); // back to the menu
 			if (sendto(s, &k, sizeof(k), 0, (struct sockaddr *)&pad_to, sizeof(pad_to)) == (int)sizeof(k)) pad_sent++;
-			if (a_sock >= 0 && k.seq % 60 == 0) sendto(a_sock, "OLA1", 4, 0, (struct sockaddr *)&audio_to, sizeof(audio_to));
 			k.seq++;
 		}
 		usleep(16000); // ponytail: ~60 Hz by sleep, not locked to the vsync
@@ -253,81 +189,6 @@ static void audio_thread(void *arg)
 	ExitThread();
 }
 
-// ---- video: ring -> IPU in 2 KB DMA blocks (libmpeg pulls them) ----
-static s64 cur_pts;
-static int pending;                 // bytes of the block the IPU DMA may still be reading
-static volatile long long wait_clk; // clock ticks spent waiting for data inside MPEG_Picture: not decode time
-static int video_data(void *u)
-{
-	(void)u;
-	dma_channel_wait(DMA_CHANNEL_toIPU, 0);
-	vring.rd += pending, pending = 0;
-	clock_t t0 = clock();
-	while (ring_used(&vring) < 2048 && !stop && !net_eof) usleep(1000);
-	wait_clk += clock() - t0;
-	if (stop || !ring_used(&vring)) return 0; // at the stream's end what is left goes in, whatever its size
-	int o = vring.rd & (vring.size - 1), n = ring_used(&vring) < 2048 ? (ring_used(&vring) + 15) & ~15 : 2048;
-	SyncDCache(vring.b + o, vring.b + o + n);
-	dma_channel_send_normal(DMA_CHANNEL_toIPU, vring.b + o, n >> 4, 0, 0);
-	pending = n;
-	return 1;
-}
-
-// libmpeg's _MPEG_Initialize resets the IPU and zeroes the D3 / D4 counts but leaves the channels started: after a
-// stream cut mid-picture, toIPU still had a block in flight and, on the console, the next stream's first
-// dma_channel_wait never returned (orbit-jellyfin). Stop both channels with the DMAC held (libmpeg's _ipu_suspend
-// sequence), then reset the IPU
-static void ipu_stop(void)
-{
-	volatile u32 *enabler = (u32 *)0x1000F520, *enablew = (u32 *)0x1000F590;
-	volatile u32 *d3_chcr = (u32 *)0x1000B000, *d4_chcr = (u32 *)0x1000B400, *d4_qwc = (u32 *)0x1000B420;
-	volatile u32 *ipu_ctrl = (u32 *)0x10002010;
-	DI();
-	u32 e = *enabler;
-	*enablew = e | 0x10000;
-	__asm__ volatile("sync.l");
-	*d4_chcr &= ~0x100, *d3_chcr &= ~0x100, *d4_qwc = 0;
-	*enablew = e;
-	EI();
-	*ipu_ctrl = 1u << 30;
-	while (*ipu_ctrl & (1u << 31));
-	pending = 0;
-}
-
-static MPEGSequenceInfo *seq;
-static u8 *pic;               // decoded picture, RGBA32 in macroblocks
-static void *video_init(void *u, MPEGSequenceInfo *si)
-{
-	(void)u;
-	static int pic_size;
-	int mbw = (si->m_Width + 15) >> 4, mbh = (si->m_Height + 15) >> 4;
-	seq = si;
-	if (pic_size < mbw * mbh * 1024) free(pic), pic = memalign(64, pic_size = mbw * mbh * 1024); // ponytail: no NULL check, libmpeg has none either
-	logf_("link: sequence %dx%d, %d ms per picture, profile %d level %d\n", si->m_Width, si->m_Height,
-	      si->m_MSPerFrame, si->m_Profile, si->m_Level);
-	return pic;
-}
-
-// ---- screen ----
-static int asp_w = 16, asp_h = 9; // [link] aspecto: the PC screen's shape; the stream is anamorphic (512x448)
-static void draw_picture(int w, int h, const char *osd)
-{
-	gfx_begin();
-	gfx_alpha(0x80);
-	gfx_rect(0, 0, GFX_W, GFX_H, 0);
-	int dh = GFX_H, dw = GFX_H * asp_w / asp_h;
-	if (dw > GFX_W) dw = GFX_W, dh = GFX_W * asp_h / asp_w;
-	gfx_mb32(pic, w, h, (GFX_W - dw) / 2, (GFX_H - dh) / 2, dw, dh); // straight from the IPU's output by DMA
-	if (osd) { // the gate numbers, at the top
-		gfx_alpha(0x50);
-		gfx_rect(40, 96, 1200, 40, 0);
-		gfx_alpha(0x80);
-		gfx_text(&gfx_font_mono, 56, 104, osd, TEXT);
-	}
-	gfx_end();
-	gfx_flip();
-}
-
 static void screen(const char *title, const char *body) // everything before the menu: the NULD splash (splash.c)
 {
 	(void)title;
@@ -344,91 +205,36 @@ static unsigned edges(unsigned b) // the buttons that went down since the last c
 }
 static int leave_combo(unsigned b) { return (b & (COMBO | PAD_START)) == (COMBO | PAD_START); }
 
-static u8 dog_stack[0x4000] __attribute__((aligned(16)));
-static void watchdog(void *arg) // every 3 s while playing: a hang leaves a trace in the log
-{
-	(void)arg;
-	int last = -1;
-	while (!stop) {
-		sleep(3);
-		if (pics == last)
-			logf_("link: stall: main at %d, ring %d KB, net eof %d, received %d KB\n", main_at, ring_used(&vring) >> 10, net_eof, net_total_kb);
-		last = pics;
-	}
-	ExitThread();
-}
+static void player_says(const char *line) { logf_("%s", line); }
 
-static void play(void) // one stream: until it ends, or the user leaves
+static void play(void) // one stream: until the PC ends it, or the user leaves (the pad thread calls nav_stop)
 {
-	static u8 vbuf[1 << 20] __attribute__((aligned(64))); // ~1.4 s at 6 Mbit/s; full, TCP holds the PC back
 	static u8 abuf[64 << 10] __attribute__((aligned(64))); // ~2.7 s of MP2 at 192 kbit/s
-	char osd[160];
-	vring = (ring){vbuf, sizeof(vbuf), 0, 0}, aring = (ring){abuf, sizeof(abuf), 0, 0};
-	a_on = a_done = a_free_ms = a_dropped = 0;
-	a_live = 1;
-	net_eof = stop = net_kb = net_total_kb = pics = main_at = 0, pending = 0, wait_clk = 0, cur_pts = 0;
-	ps_init(&dmx, on_video, on_audio, NULL);
+	nav_source src;
+	nav_stats st = {0};
+	int r = nav_net_open(host_ip, VIDEO_PORT, FAST_KBS, &src);
+	if (r < 0) { logf_("link: no stream from the PC (%d)\n", r); return; }
+	aring = (ring){abuf, sizeof(abuf), 0, 0};
+	a_on = a_done = a_free_ms = a_dropped = 0, stop = 0;
 	extern void *_gp;
-	ee_thread_t nt = {.func = net_thread, .stack = net_stack, .stack_size = sizeof(net_stack), .gp_reg = &_gp, .initial_priority = 0x30};
-	ee_thread_t wt = {.func = watchdog, .stack = dog_stack, .stack_size = sizeof(dog_stack), .gp_reg = &_gp, .initial_priority = 0x20};
-	ee_thread_t at = {.func = audio_thread, .stack = audio_stack, .stack_size = sizeof(audio_stack), .gp_reg = &_gp, .initial_priority = 0x70}; // under the main thread (0x60): libmad runs while it waits for the vsync, never in the middle of a picture
-	int ntid = CreateThread(&nt), wtid = CreateThread(&wt), atid = CreateThread(&at);
-	StartThread(ntid, NULL), StartThread(wtid, NULL), StartThread(atid, NULL);
-	ipu_stop();
-	dma_channel_initialize(DMA_CHANNEL_toIPU, NULL, 0);
-	MPEG_Initialize(video_data, NULL, video_init, NULL, &cur_pts);
+	// under the player's thread (0x60): libmad runs while that one waits, never in the middle of a picture
+	ee_thread_t at = {.func = audio_thread, .stack = audio_stack, .stack_size = sizeof(audio_stack), .gp_reg = &_gp, .initial_priority = 0x70};
+	int atid = CreateThread(&at);
+	StartThread(atid, NULL);
+	nav_live_audio(on_audio);
 	pad_live = 1;
-	int decoded = 0, shown = 0, skipped = 0, win_dec = 0, win_shown = 0, win_skip = 0, ms_avg = 0;
-	clock_t last_report = clock(), dec_clk = 0, dec_max = 0;
-	for (;;) {
-		unsigned b = pad_buttons(), p = edges(b);
-		if (leave_combo(b)) { leave = 1; break; }
-		if ((b & COMBO) == COMBO && (p & PAD_SELECT)) show_osd ^= 1;
-		if ((b & COMBO) == COMBO && (p & PAD_TRIANGLE)) break; // back to the menu
-		s64 t;
-		main_at = 1;
-		clock_t c0 = clock();
-		long long w0 = wait_clk;
-		if (!MPEG_Picture(pic, &t)) { logf_("link: end of video (eof %d)\n", seq ? seq->m_fEOF : -1); break; }
-		clock_t d = clock() - c0 - (clock_t)(wait_clk - w0); // decode time: the waits for data taken out
-		dec_clk += d;
-		if (d > dec_max) dec_max = d;
-		decoded++, win_dec++, pics++;
-		// behind (the PC is more than atraso_kb ahead): decoded, since the next P pictures need it, not drawn (a draw
-		// costs the picture upload and a vsync). ponytail: no jump to the next I picture; if the IPU cannot keep up the
-		// ring fills and TCP holds the PC back, where the latency then grows
-		if (ring_used(&vring) > behind_kb << 10) { skipped++, win_skip++; continue; }
-		main_at = 2;
-		if (win_dec) ms_avg = (int)((long long)dec_clk * 1000 / CLOCKS_PER_SEC / win_dec);
-		snprintf(osd, sizeof(osd), L("dec %d  vis %d  salt %d  %d ms  red %d KB/s  buf %d KB  pad %d/s",
-		         "dec %d  shown %d  skip %d  %d ms  net %d KB/s  buf %d KB  pad %d/s"),
-		         decoded, shown, skipped, ms_avg, net_kb, ring_used(&vring) >> 10, pad_rate);
-		draw_picture(seq->m_Width, seq->m_Height, show_osd ? osd : NULL);
-		shown++, win_shown++;
-		if (clock() - last_report > 5 * CLOCKS_PER_SEC) { // gate numbers, every 5 s
-			float sec = (float)(clock() - last_report) / CLOCKS_PER_SEC;
-			pad_rate = (int)(pad_sent / sec), pad_sent = 0;
-			logf_("link: %.1f s: %.1f decoded/s, %.1f shown/s, skipped %d, decode %d ms avg %d max, net %d KB/s, ring %d KB, pad %d/s, audio %d ms free in audsrv, %d cuts\n",
-			      sec, win_dec / sec, win_shown / sec, win_skip, ms_avg, (int)((long long)dec_max * 1000 / CLOCKS_PER_SEC),
-			      net_kb, ring_used(&vring) >> 10, pad_rate, a_free_ms, a_dropped);
-			win_dec = win_shown = win_skip = 0, dec_clk = dec_max = 0, last_report = clock();
-		}
-	}
-	stop = 1, pad_live = 0, a_live = 0;
-	MPEG_Destroy();
-	ipu_stop();
-	// the network thread leaves by itself (it checks stop between reads; a full ring returns at once): terminated
-	// inside lwIP's recv, the next connection could hang on lwIP's state (orbit-jellyfin)
-	for (int t = 0; t < 300 && !net_eof; t++) usleep(10000);
-	if (!net_eof) TerminateThread(ntid), logf_("link: network thread did not stop\n");
-	http_close(&hs);
-	// the audio thread leaves by itself too: terminated inside an audsrv call, the next one hung (jfplay)
+	r = nav_play_live(&src, player_says, &st); // takes the GS and this thread until the stream ends
+	stop = 1, pad_live = 0;
+	nav_live_audio(NULL);
+	nav_net_close();
+	// the audio thread leaves by itself: terminated inside an audsrv call, the next one hung (jfplay)
 	for (int t = 0; t < 200 && !a_done; t++) usleep(10000);
 	if (!a_done) TerminateThread(atid), logf_("link: audio thread did not stop\n");
 	audsrv_stop_audio();
-	TerminateThread(wtid);
-	DeleteThread(ntid), DeleteThread(wtid), DeleteThread(atid);
-	logf_("link: stopped: %d decoded, %d shown, %d skipped, demux skipped %d bytes\n", decoded, shown, skipped, dmx.skipped);
+	DeleteThread(atid);
+	logf_("link: stopped (%d): %d decoded, %d shown, %d dropped, %u datagrams sent again, audio %d cuts\n", r, st.decoded, st.shown,
+	      st.dropped, nav_net_gaps(), a_dropped);
+	gfx_init(); // the player left its own video mode and a black screen
 }
 
 // ---- menu: the desktop, then the PC's games (link.py /catalog), covers from /cover/<n> as 256x368 CT16 ----
@@ -443,12 +249,33 @@ static int ngames;
 
 static int get_body(const char *path, void *dst, int max) // the whole body of GET path: its length, or < 0
 {
-	static http_stream h;
-	int st = http_open(&h, host, VIDEO_PORT, "GET", path, "", NULL), n = 0, k;
-	if (st == 200)
-		while (n < max && (k = http_read(&h, (char *)dst + n, max - n)) > 0) n += k;
-	http_close(&h);
-	return st == 200 ? n : st < 0 ? st : -1;
+	static char head[1024];
+	nav_source src;
+	char req[44];
+	int hn = 0, st = 0, body = -1, clen, n = 0;
+	if (snprintf(req, sizeof(req), "GET %s HTTP/1.0\r\n\r\n", path) >= (int)sizeof(req)) return NET_ERR_PROTO;
+	if (nav_net_tcp(host_ip, VIDEO_PORT, req, &src) < 0) return NET_ERR_CONNECT;
+	for (int idle = 0; idle < 5000;) { // 10 s without a byte: the PC is not answering
+		const unsigned char *p;
+		int k = src.pull(src.user, &p);
+		if (k < 0) break; // the PC closed: the answer is whole
+		if (!k) { usleep(2000), idle++; continue; }
+		idle = 0;
+		if (body < 0) { // still in the header
+			int t = k < (int)sizeof(head) - hn ? k : (int)sizeof(head) - hn;
+			memcpy(head + hn, p, t), hn += t;
+			if (!http_parse(head, hn, &st, &body, &clen)) {
+				if (hn == (int)sizeof(head)) break; // no header in the first KB: not HTTP
+				continue;
+			}
+			p = (const unsigned char *)head + body, k = hn - body; // what came after it in the same pieces
+			// ponytail: a piece that overflowed head[] would lose bytes here; answers' headers are ~70 bytes
+		}
+		if (n + k > max) k = max - n;
+		memcpy((char *)dst + n, p, k), n += k;
+	}
+	nav_net_close();
+	return body < 0 ? NET_ERR_PROTO : st == 200 ? n : -1;
 }
 
 static int load_catalog(void) // "SOURCE\tTitle" lines; the game count, or < 0 if the PC did not answer
@@ -596,7 +423,7 @@ static int menu(void) // 0 = the desktop, n = game n; -1 = leave
 int main(void)
 {
 	static ini cfg;
-	char msg[256], ps[8];
+	char msg[256];
 	// priorities as orbit-jellyfin: the HTTP reader (0x30) and the pad (0x40) block most of the time; lwIP's tcpip
 	// thread (0x58) and netman (0x56-0x59) must preempt the decode + draw, which only this thread does
 	ChangeThreadPriority(GetThreadId(), 0x60);
@@ -607,37 +434,27 @@ int main(void)
 	if (!ini_load(&cfg, "mass0:/nuld/config.ini")) ini_load(&cfg, "mass0:/orbit/config.ini"); // the launcher's; orbit/ until v1.1
 	lang_en = !strcasecmp(ini_get(&cfg, "ui", "idioma", "es"), "en"); // the launcher's [ui] idioma
 	snprintf(host, sizeof(host), "%s", ini_get(&cfg, "link", "servidor", ""));
-	if (sscanf(ini_get(&cfg, "link", "aspecto", "16:9"), "%d:%d", &asp_w, &asp_h) != 2 || asp_w <= 0 || asp_h <= 0) asp_w = 16, asp_h = 9;
-	behind_kb = atoi(ini_get(&cfg, "link", "atraso_kb", "48"));
-	if (behind_kb < 4) behind_kb = 4;
-	logf_("link: start, servidor %s, aspecto %d:%d, atraso %d KB\n", host, asp_w, asp_h, behind_kb);
-	if (!*host) {
+	host_ip = net_aton(host);
+	logf_("link: start, servidor %s\n", host);
+	if (!host_ip) {
 		screen("ORBIT Link", L("Falta [link] servidor = <IP de la PC> en mass0:/nuld/config.ini",
 		                       "Missing [link] servidor = <PC IP> in mass0:/nuld/config.ini"));
 		SleepThread();
 	}
 	screen("ORBIT Link", L("Conectando a la red...", "Connecting to the network..."));
 	int r = net_up(ini_get(&cfg, "red", "ip", "dhcp"), ini_get(&cfg, "red", "mascara", "255.255.255.0"),
-	               ini_get(&cfg, "red", "puerta", ""), ini_get(&cfg, "red", "dns", ""));
+	               ini_get(&cfg, "red", "puerta", ""));
 	if (r < 0) {
 		snprintf(msg, sizeof(msg), L("Error de red %d (cable, DHCP o [red] de config.ini)", "Network error %d (cable, DHCP or [red] in config.ini)"), r);
 		logf_("%s\n", msg);
 		screen("ORBIT Link", msg);
 		SleepThread();
 	}
-	logf_("link: mtu %d\n", net_mtu);
 	pad_analog();
-	struct addrinfo hints = {0}, *ai; // the pad's UDP target: the same host, port 8098
-	hints.ai_family = AF_INET, hints.ai_socktype = SOCK_DGRAM;
-	snprintf(ps, sizeof(ps), "%d", PAD_PORT);
-	if (getaddrinfo(host, ps, &hints, &ai) == 0) memcpy(&pad_to, ai->ai_addr, sizeof(pad_to)), freeaddrinfo(ai);
-	else logf_("link: cannot resolve %s for the pad\n", host);
-	audio_to = pad_to, audio_to.sin_port = htons(AUDIO_PORT); // the audio hellos: same host, port 8097
+	pad_to.sin_family = AF_INET, pad_to.sin_port = htons(PAD_PORT), pad_to.sin_addr.s_addr = host_ip;
 	extern void *_gp;
 	ee_thread_t pt = {.func = pad_thread, .stack = pad_stack, .stack_size = sizeof(pad_stack), .gp_reg = &_gp, .initial_priority = 0x40};
 	StartThread(CreateThread(&pt), NULL);
-	ee_thread_t rt = {.func = audio_rx, .stack = arx_stack, .stack_size = sizeof(arx_stack), .gp_reg = &_gp, .initial_priority = 0x30};
-	StartThread(CreateThread(&rt), NULL);
 	for (;;) { // the PC may not be serving yet: try every 2 s. ponytail: the catalog once per start
 		int st = load_catalog();
 		if (st >= 0) break;
@@ -652,16 +469,17 @@ int main(void)
 	}
 	if (!leave) screen("ORBIT Link", L("Cargando portadas...", "Loading covers...")), load_covers();
 	splash_stop(); // the menu and the stream draw for themselves
+	// [link] directo = 1: the desktop's stream at once, the menu only after it ends (a console that is just a screen)
+	int direct = atoi(ini_get(&cfg, "link", "directo", "0"));
 	while (!leave) {
-		int g = menu();
+		int g = direct ? 0 : menu();
+		direct = 0;
 		if (g < 0) break;
 		if (g) {
 			snprintf(msg, sizeof(msg), "/launch/%d", g - 1);
 			get_body(msg, msg, 0);
 			logf_("link: launched %s\n", gname[g - 1]);
 		}
-		if (http_open(&hs, host, VIDEO_PORT, "GET", "/", "", NULL) != 200) { http_close(&hs); continue; }
-		logf_("link: connected to %s:%d%s\n", host, VIDEO_PORT, hs.chunked ? " (chunked)" : "");
 		play();
 	}
 	logf_("link: leaving\n");

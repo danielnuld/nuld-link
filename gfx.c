@@ -232,7 +232,9 @@ static int vsync_handler(int cause) // VBLANK_S: wake the render thread (gfx_fli
 
 int gfx_init(void)
 {
-	pk = packet_init(PACKET_QW, PACKET_NORMAL);
+	// may be called again: after nuld-av's player, which takes the GS and leaves its own mode (link.c play)
+	if (!pk) pk = packet_init(PACKET_QW, PACKET_NORMAL);
+	back = 0;
 	dma_channel_initialize(DMA_CHANNEL_GIF, NULL, 0);
 	dma_channel_fast_waits(DMA_CHANNEL_GIF);
 
@@ -272,8 +274,8 @@ int gfx_init(void)
 	graph_enable_output();
 
 	ee_sema_t sema = { .init_count = 0, .max_count = 1, .option = 0 };
-	vsync_sema = CreateSema(&sema);
-	vsync_handler_id = AddIntcHandler(INTC_VBLANK_S, vsync_handler, 0);
+	if (vsync_sema < 0) vsync_sema = CreateSema(&sema);
+	if (vsync_handler_id < 0) vsync_handler_id = AddIntcHandler(INTC_VBLANK_S, vsync_handler, 0);
 	EnableIntc(INTC_VBLANK_S);
 
 	slot = vram_alloc(SLOT_W / 64 * (SLOT_H / 64) * 2048, 0);

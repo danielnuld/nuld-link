@@ -1,31 +1,33 @@
-# ORBIT Link
+# NULD Link
 
 The PlayStation 2 as a streaming client of your PC: the PC captures its screen and encodes it, the PS2 decodes it on
 its IPU and shows it on the TV, and the PS2 controller comes back as a virtual Xbox 360 pad. Steam, PCSX2, any
 emulator, on the TV the PS2 is plugged into, with the PS2 pad. A companion of the
 [ORBIT launcher](https://github.com/danielnuld/ps2-launcher), built on [NULD Jellyfin](https://github.com/danielnuld/nuld-jellyfin)'s player.
 
-**Phase 19 spike (go / no-go): latency.** Video only, 512x448 at 30 fps; the gate is in `docs/phase19-results.md`.
+**1280x720 at 30 pictures a second, 70-100 ms from the PC's screen to the TV** (stopwatch photos on a SCPH-75001, TV in
+game mode, 2026-11-15), with [nuld-av](https://github.com/danielnuld/nuld-av). The first version (512x448 through
+ps2sdk's libmpeg over TCP) is in `docs/phase19-results.md` and on the `master` branch.
 
 ## How it works
 
-- **PC** (`server/link.py`): listens on TCP 8099; when the PS2 connects it starts ffmpeg, which captures the screen
-  (gdigrab), scales it to 512x448, encodes MPEG-2 with I and P pictures only (no B pictures: nothing to reorder) and
-  writes an MPEG program stream to a pipe relayed to the PS2 (`TCP_NODELAY`). Capture starts with the connection on
-  purpose: started earlier, gdigrab hands over every frame it missed in a burst. A thread receives the pad over UDP
-  (port 8098) and drives a virtual Xbox 360 controller (ViGEm).
-- **PS2** (`link.elf`): reads the stream (lwIP), demuxes it, decodes every picture on the IPU (ps2sdk libmpeg) and
-  draws it the moment it is decoded: no prebuffer, no clock. If more than `atraso_kb` of video is waiting, pictures
-  are decoded but not drawn until the PS2 catches up. The pad is read 60 times a second and sent as 16-byte packets.
-
-Measured on the PC side (i7-1165G7, 2026-10-16): capture + MPEG-2 encode at 512x448 / 30 fps runs in real time with
-~14 ms of CPU per picture (`mpeg2video`); `mpeg2_qsv` works too. The PS2 side is what the gate measures.
+- **PC** (`server/link.py`): when the PS2 asks, ffmpeg captures the screen (gdigrab), scales it to 1280x720 and encodes
+  MPEG-2 with I and P pictures only; nuld-av's `psvpack` repacks each picture for the PS2's IPU as it leaves the
+  encoder and it goes out at once by UDP (nuld-av's fast path, with lost datagrams sent again). What Windows plays
+  goes in the same stream as MP2. A thread receives the pad over UDP (port 8098) and drives a virtual Xbox 360
+  controller (ViGEm). The menu's catalog, covers and launches are small HTTP requests on TCP 8099.
+- **PS2** (`link.elf`): nuld-av's player shows every picture as soon as it is decoded (no buffer, no clock); the sound
+  goes through libmad to audsrv. TCP/IP runs on the IOP and the stream is taken straight from the Ethernet driver
+  there. The pad is read 60 times a second and sent as 16-byte packets.
 
 ## Build
 
+nuld-av, built, beside this folder (`../nuld-av`, or `make NULDAV=<folder>`):
+
 ```
-wsl bash build.sh          # link.elf (ps2dev v2.0.0)
-wsl bash build.sh test     # host selftests of the shared pieces
+wsl bash ../nuld-av/build.sh   # libnuldav.a and netring.irx
+wsl bash build.sh              # link.elf
+wsl bash build.sh test         # host selftests of the shared pieces
 ```
 
 ## Install
@@ -38,38 +40,36 @@ from uLaunchELF. Add to the launcher's `mass0:/nuld/config.ini` (`mass0:/orbit/`
 ip = dhcp
 
 [link]
-servidor = 192.168.1.10   ; the PC running server/link.py
-aspecto = 16:9            ; the PC screen's shape (the stream is anamorphic); 4:3 for a 4:3 window
-atraso_kb = 48            ; more than this waiting in the ring = behind: pictures decoded, not drawn
+servidor = 192.168.1.10   ; the PC running server/link.py: its address, not a name
+directo = 0               ; 1: the desktop's stream at once, the menu only after it ends
 ```
 
-The log goes to `mass0:/link.txt` (and the EE serial port): every 5 s, pictures decoded / shown / skipped, decode ms
-(average and worst), network KB/s, ring KB and pad packets/s.
+The log goes to `mass0:/link.txt` (and the EE serial port): every 5 s, pictures shown and dropped, decode ms, what
+waits to be decoded and the network's KB/s.
 
 ## PC
 
-Needs ffmpeg in `PATH`, Python 3, the [ViGEmBus](https://github.com/nefarius/ViGEmBus/releases) driver and
-`pip install vgamepad` (without it the pad is counted, not applied). Windows asks once to allow Python through the
-firewall (UDP 8098 in) and ffmpeg (TCP 8099 in).
+Needs ffmpeg in `PATH`, Python 3, nuld-av beside this repository with its `tools/psvpack.exe` built
+(`tools/build_psvpack.bat` there), the [ViGEmBus](https://github.com/nefarius/ViGEmBus/releases) driver and
+`pip install vgamepad` (without it the pad is counted, not applied), and `pip install soundcard numpy` for the sound.
+Windows asks once to allow Python through the firewall (UDP 8098 and 8099, TCP 8099 in).
 
 ```
-python server/link.py                                    # the desktop
-python server/link.py --encoder mpeg2_qsv --title PCSX2  # Intel Quick Sync, one window
-python server/link.py --size 480x448 --fps 25            # lighter, if the PS2 cannot keep up
+python server/link.py                    # the desktop
+python server/link.py --title PCSX2      # one window
+python server/link.py --rate 16M         # more bits (the PS2's network takes ~20M)
 ```
 
-Without a PS2: `python server/check.py` connects as the PS2 does (200, MPEG program stream, 60 pad packets), or
-`ffplay -fflags nobuffer -flags low_delay http://127.0.0.1:8099` shows the stream.
+Put the TV in game mode: its own processing was most of the delay.
 
 ## Controls
 
 Everything goes to the PC: ✕ A, ○ B, □ X, △ Y, L1/R1 shoulders, L2/R2 triggers, SELECT Back, START Start, sticks and
-L3/R3, D-pad. On the PS2 itself: **L1+L2+R1+R2 + SELECT** shows the gate numbers; **L1+L2+R1+R2 + START** leaves.
+L3/R3, D-pad. On the PS2 itself: **L1+L2+R1+R2 + TRIANGLE** goes back to the menu; **L1+L2+R1+R2 + START** leaves.
 
-## Limits of the spike
+## Limits
 
-- No sound. Video only, 512x448 (896 macroblocks: ps2sdk libmpeg never finishes pictures over 1023 macroblocks,
-  found in the Jellyfin spike, so 640x448 is out until that is fixed).
-- 720p output (the launcher's HDMI setup). 480i / 240p for a CRT comes after the gate, from the launcher's `gfx.c`.
-- TCP: if the IPU falls behind, the ring fills and TCP holds ffmpeg back, so latency grows on the PC side; the
-  numbers in the log show it (ring KB, skipped). No jump to the next I picture yet.
+- 16:9 only: the PC's screen is scaled to 1280x720 whatever its shape.
+- If the PS2 or the network falls behind, pictures wait on the PC and the delay grows until it catches up; there
+  is no jump to the newest picture yet.
+- 720p output only (the launcher's HDMI set-up); 480i / 240p for a CRT is not done.

@@ -1,10 +1,9 @@
-// Network for the cover download (phase 8): IOP ps2dev9 + netman + smap, lwIP on the EE, DHCP or a fixed IP,
-// HTTPS through wolfSSL (ps2sdk ports). Bring-up as ps2sdk samples/network/tcpip-dhcp/ps2ip.c (docs/sources.md);
-// HTTP/1.0, one connection per file, body read to EOF and checked against Content-Length.
+// Network bring-up (DHCP or a fixed IP), TCP/IP on the IOP, and the HTTP answer's header parser.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <strings.h>
 #include "net.h"
 
 int http_parse(const char *buf, int n, int *status, int *body, int *clen)
@@ -23,63 +22,24 @@ int http_parse(const char *buf, int n, int *status, int *body, int *clen)
 }
 
 #ifndef SELFTEST
-#include <stdarg.h>
-#include <fcntl.h>
 #include <unistd.h>
-#include <time.h>
 #include <kernel.h>
 #include <sifrpc.h>
 #include <loadfile.h>
 #include <netman.h>
-#include <ps2ip.h>
-#include <netdb.h>
-#include <arpa/inet.h>
-#include <wolfssl/options.h>
-#include <wolfssl/ssl.h>
+#include <ps2ips.h>
 
-// wolfSSL seeds its RNG from /dev/urandom, which the PS2 lacks. The link wraps open/read (Makefile -Wl,--wrap) and
-// serves that one path from COP0.Count jitter. ponytail: weak entropy, fine for public cover images over TLS;
-// real entropy (pad and network timings) if TLS ever carries anything private.
-#define URANDOM_FD 4093
-int __real_open(const char *path, int flags, ...);
-int __real_read(int fd, void *buf, size_t n);
-int __wrap_open(const char *path, int flags, ...)
-{
-	if (!strcmp(path, "/dev/urandom") || !strcmp(path, "/dev/random")) return URANDOM_FD;
-	va_list ap;
-	va_start(ap, flags);
-	int mode = va_arg(ap, int);
-	va_end(ap);
-	return __real_open(path, flags, mode);
-}
-int __wrap_read(int fd, void *buf, size_t n)
-{
-	if (fd != URANDOM_FD) return __real_read(fd, buf, n);
-	static unsigned x = 0x9E3779B9;
-	x ^= (unsigned)time(NULL) ^ (unsigned)clock();
-	for (size_t i = 0; i < n; i++) {
-		unsigned c;
-		for (int k = 0; k < 8; k++) { // the count's low bits after uneven work: cache, interrupts, other threads
-			__asm__ volatile("mfc0 %0, $9" : "=r"(c));
-			x = (x ^ c) * 0x01000193;
-			for (volatile unsigned j = c & 31; j; j--) {}
-		}
-		((unsigned char *)buf)[i] = x >> 24;
-	}
-	return n;
-}
-
+// TCP/IP runs on the IOP (ps2ip-nm.irx): nuld-av's netring.irx takes the stream straight from the Ethernet driver
+// there (smap-modular-netman.irx, which it hooks), and the EE only makes calls: ps2ips for the address set-up and
+// the pad's datagrams, nuld-av for everything that is read
 #define IRX(m) extern unsigned char m##_irx[]; extern unsigned int size_##m##_irx
-IRX(ps2dev9); IRX(netman); IRX(smap);
-volatile int net_busy;
-int net_mtu;
+IRX(ps2dev9); IRX(netman); IRX(smap); IRX(ps2ip_nm); IRX(ps2ips); IRX(netring);
 
-int net_dev9(void)
+unsigned net_aton(const char *s) // "a.b.c.d" -> network order, as lwIP keeps it; 0 if it is not one
 {
-	static int st; // 0 not tried, 1 loaded, -1 failed
-	int r = 0;
-	if (!st) st = SifExecModuleBuffer(ps2dev9_irx, size_ps2dev9_irx, 0, NULL, &r) >= 0 && r != 1 ? 1 : -1;
-	return st == 1;
+	unsigned a = 0, b = 0, c = 0, d = 0;
+	if (sscanf(s, "%u.%u.%u.%u", &a, &b, &c, &d) != 4) return 0;
+	return a | b << 8 | c << 16 | d << 24;
 }
 
 static int wait_for(int (*ok)(void)) // 10 s, as the ps2sdk sample
@@ -97,81 +57,29 @@ static int dhcp_bound(void)
 	return ps2ip_getconfig("sm0", &ip) >= 0 && ip.dhcp_status == DHCP_STATE_BOUND;
 }
 
-int ip4addr_aton(const char *cp, struct ip4_addr *addr); // libps2ip (lwIP), not declared by the installed headers
-
-int net_up(const char *ip, const char *mask, const char *gw, const char *dns)
+int net_up(const char *ip, const char *mask, const char *gw)
 {
-	struct { unsigned char *irx; unsigned *size; } mods[] = {{netman_irx, &size_netman_irx}, {smap_irx, &size_smap_irx}};
-	if (net_busy) return NET_ERR_BUSY; // udpbd / udpfs: Neutrino's smap already drives the adapter
-	if (!net_dev9()) return NET_ERR_MODULES; // shared with the HDD (phase 14)
-	for (int i = 0; i < 2; i++) {
+	struct { unsigned char *irx; unsigned *size; } mods[] = {{ps2dev9_irx, &size_ps2dev9_irx}, {netman_irx, &size_netman_irx},
+		{smap_irx, &size_smap_irx}, {ps2ip_nm_irx, &size_ps2ip_nm_irx}, {ps2ips_irx, &size_ps2ips_irx},
+		{netring_irx, &size_netring_irx}};
+	for (unsigned i = 0; i < sizeof(mods) / sizeof(mods[0]); i++) {
 		int r = 0;
 		if (SifExecModuleBuffer(mods[i].irx, *mods[i].size, 0, NULL, &r) < 0 || r == 1) return NET_ERR_MODULES;
 	}
 	NetManInit();
+	if (ps2ip_init() < 0) return NET_ERR_MODULES;
 	int dhcp = !strcasecmp(ip, "dhcp");
-	struct ip4_addr a, m, g, d;
-	ip4_addr_set_zero(&a), ip4_addr_set_zero(&m), ip4_addr_set_zero(&g), ip4_addr_set_zero(&d);
-	// lwIP's own parser: arpa/inet.h's inet_aton is libcglue_inet_aton, which goes through the socket glue that
-	// ps2ipInit installs, so before it every fixed address came out 0.0.0.0 and nothing left the PS2 (launcher phase 16)
-	if (!dhcp) ip4addr_aton(ip, &a), ip4addr_aton(mask, &m), ip4addr_aton(gw, &g), ip4addr_aton(dns, &d);
-	ps2ipInit(&a, &m, &g);
-	// applied again through setconfig, as ps2sdk's tcpip-dhcp sample (ethApplyIPConfig) does
 	t_ip_info info;
 	if (ps2ip_getconfig("sm0", &info) < 0) return NET_ERR_MODULES;
-	info.dhcp_enabled = dhcp; // the lease brings the DNS server too
-	if (!dhcp) memcpy(&info.ipaddr, &a, 4), memcpy(&info.netmask, &m, 4), memcpy(&info.gw, &g, 4), dns_setserver(0, &d);
+	info.dhcp_enabled = dhcp;
+	if (!dhcp) {
+		unsigned a = net_aton(ip), m = net_aton(mask), g = net_aton(gw);
+		memcpy(&info.ipaddr, &a, 4), memcpy(&info.netmask, &m, 4), memcpy(&info.gw, &g, 4);
+	}
 	ps2ip_setconfig(&info);
 	if (!wait_for(link_up)) return NET_ERR_LINK;
 	if (dhcp && !wait_for(dhcp_bound)) return NET_ERR_DHCP;
-	// On the console (SCPH-75001) some full-size frames arrive with bytes 1472-1513 zeroed: 42 bytes at the end of a
-	// 1460-byte TCP segment, seen in every Jellyfin answer, never in PCSX2 (no cache model). ps2sdk netman writes back
-	// the D-cache over the received frame rounded up to 64 bytes, and the line holding bytes 1472+ is shared with what
-	// follows the buffer. A lower MTU makes lwIP advertise a smaller MSS (TCP_CALCULATE_EFF_SEND_MSS), so the peer never
-	// sends frames that long. The installed headers do not match libps2ip's struct netif (mtu at 38, the library's
-	// SMapIFInit stores it at 40 and the name at 50), so the field is written at the library's offset, after checking it.
-	unsigned char *nif = (unsigned char *)netif_find("sm0");
-	if (nif && nif[50] == 's' && nif[51] == 'm' && *(unsigned short *)(nif + 40) == 1500)
-		*(unsigned short *)(nif + 40) = net_mtu = 1400;
 	return 0;
-}
-
-int https_get(const char *host, const char *path, char *buf, int max, int *body, int *len)
-{
-	static WOLFSSL_CTX *ctx;
-	if (!ctx) {
-		wolfSSL_Init();
-		ctx = wolfSSL_CTX_new(wolfSSLv23_client_method());
-		if (!ctx) return NET_ERR_TLS;
-		// ponytail: no certificate check (no CA store, and the RTC may be off); the data is public cover art and every
-		// image is size-checked after decoding. Embed the host's root CA if anything private ever goes over this.
-		wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_NONE, NULL);
-	}
-	struct addrinfo hints = {0}, *ai;
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = SOCK_STREAM;
-	if (getaddrinfo(host, "443", &hints, &ai) != 0) return NET_ERR_DNS;
-	int s = socket(AF_INET, SOCK_STREAM, 0), r = s < 0 ? -1 : connect(s, ai->ai_addr, ai->ai_addrlen);
-	freeaddrinfo(ai);
-	if (r < 0) { if (s >= 0) close(s); return NET_ERR_CONNECT; }
-	struct timeval tv = {15, 0}; // a stalled server must not hang the download thread forever
-	setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-	WOLFSSL *ssl = wolfSSL_new(ctx);
-	int st = NET_ERR_TLS, n = snprintf(buf, max, "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", path, host);
-	if (ssl && wolfSSL_UseSNI(ssl, WOLFSSL_SNI_HOST_NAME, host, strlen(host)) == WOLFSSL_SUCCESS &&
-	    wolfSSL_set_fd(ssl, s) == WOLFSSL_SUCCESS && wolfSSL_connect(ssl) == WOLFSSL_SUCCESS &&
-	    wolfSSL_write(ssl, buf, n) == n) {
-		for (n = 0; n < max && (r = wolfSSL_read(ssl, buf + n, max - n)) > 0;) n += r;
-		int clen;
-		st = NET_ERR_PROTO;
-		if (http_parse(buf, n, &st, body, &clen)) {
-			*len = n - *body;
-			if (st == 200 && clen != *len) st = NET_ERR_PROTO; // truncated, or bigger than buf
-		}
-	}
-	if (ssl) wolfSSL_shutdown(ssl), wolfSSL_free(ssl);
-	close(s);
-	return st;
 }
 
 #else // host check: `make test`
