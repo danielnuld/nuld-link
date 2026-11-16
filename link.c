@@ -290,8 +290,11 @@ static int get_body(const char *path, void *dst, int max) // the whole body of G
 				if (hn == (int)sizeof(head)) break; // no header in the first KB: not HTTP
 				continue;
 			}
-			p = (const unsigned char *)head + body, k = hn - body; // what came after it in the same pieces
-			// ponytail: a piece that overflowed head[] would lose bytes here; answers' headers are ~70 bytes
+			// what came after it in this same piece, all of it: taken from head[], a piece longer than what was
+			// left of head[] lost the rest, and nuld-av's pieces are up to 16 KB where http.c's were small: every
+			// cover (188 KB) came short and was thrown away, the catalog (under 1 KB) did not (console, 2026-11-16)
+			int skip = body - (hn - t); // of this piece: the header's end
+			p += skip, k -= skip;
 		}
 		if (n + k > max) k = max - n;
 		memcpy((char *)dst + n, p, k), n += k;
