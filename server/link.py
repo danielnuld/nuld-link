@@ -118,17 +118,34 @@ def steam_games():
 
 
 def gfn_games():
-    """GeForce NOW: its own shortcuts on the desktop and in the Start menu. "NVIDIA GeForce NOW" opens the app (its
-    library is walked with the pad); a game's own shortcut (in the app: the game's menu, "add a desktop shortcut")
-    starts that game. Nothing of its library is on disk to read, and the stream is one more window to capture."""
-    dirs = [Path(os.environ.get(v, "")) / d for v, d in (("USERPROFILE", "Desktop"), ("PUBLIC", "Desktop"),
-            ("APPDATA", "Microsoft/Windows/Start Menu/Programs"))]
+    """The user's GeForce NOW library, from the app's own cache of it (its "Library" panel as the service answered
+    last: the app refreshes it when it opens). One entry per game with a shop chosen for it; launched through the
+    app with the game's id, as the shortcuts the app makes do. Its stream is one more window to capture. Covers:
+    Steam's tall one by the game's name, else the app's wide banner cropped."""
+    home = Path(os.environ.get("LOCALAPPDATA", "")) / "NVIDIA Corporation/GeForceNOW"
     out, seen = [], set()
-    for lnk in (l for d in dirs if d.is_dir() for l in sorted(d.glob("*.lnk"))):
-        name = re.sub(r"(?i)^NVIDIA\s+|\s+(on|en)\s+GeForce NOW$", "", lnk.stem)
-        if "geforce now" in lnk.stem.lower() and name.lower() not in seen:
-            seen.add(name.lower())
-            out.append(("GFN", name, str(lnk), None if name.lower() == "geforce now" else steam_cover(name)))
+
+    def walk(o):
+        if isinstance(o, list):
+            for x in o:
+                walk(x)
+        elif isinstance(o, dict):
+            mine = [v for v in o.get("variants") or [] if (v.get("gfn") or {}).get("library", {}).get("selected")]
+            if mine and o.get("title") and o.get("id") not in seen:
+                seen.add(o["id"])
+                title = re.sub(r"[®™]", "", o["title"]).strip()
+                route = f"#?cmsId={mine[0]['id']}&launchSource=External&shortName={title}&parentGameId={o['id']}"
+                out.append(("GFN", title, [str(home / "CEF/GeForceNOW.exe"), "--url-route=" + route],
+                            steam_cover(title) or (o.get("images") or {}).get("HERO_IMAGE")))
+            for x in o.values():
+                walk(x)
+    for f in sorted((home / "CefCache/Default/Service Worker/CacheStorage").glob("*/*/*_0"), key=os.path.getmtime):
+        try:
+            b = f.read_bytes()
+            if b"requestType=panels/Library" in b[:600]:
+                walk(json.JSONDecoder().raw_decode(b[b.index(b'{"data"'):].decode("utf-8", "replace"))[0])
+        except (OSError, ValueError):
+            pass
     return out
 
 
@@ -236,7 +253,8 @@ def small(c, path):
             before = windows()
             if games[int(m[1])][0] == "GFN":  # its window may be open already, behind: that one too
                 before = {h: p for h, p in before.items() if not exe(p).startswith("geforcenow")}
-            os.startfile(games[int(m[1])][2])
+            how = games[int(m[1])][2]
+            subprocess.Popen(how) if isinstance(how, list) else os.startfile(how)
             threading.Thread(target=to_front, args=(before,), daemon=True).start()
         else:
             code = 404
