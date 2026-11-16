@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """NULD Link, the PC side: sends the screen to the PS2 and turns its pad into an Xbox 360 controller.
 
-  python server/link.py                    # the desktop, 1280x720 at 30 pictures a second, 12 Mbit/s
+  python server/link.py                    # the desktop, 1280x720 at 30 pictures a second, 12 Mbit/s, on the GPU
+  python server/link.py --grab gdigrab --encoder mpeg2video   # without an Intel GPU
   python server/link.py --title PCSX2      # one window (gdigrab title=)
   python server/link.py --region 0,0,1920x1080 --rate 16M
 
@@ -295,7 +296,10 @@ def main():
     except ImportError:
         sys.exit(f"link: nuld-av's tools are not in {a.nuldav} (github.com/danielnuld/nuld-av; --nuldav <folder>)")
     live = argparse.ArgumentParser()
-    livesrv.add_args(live) # --rate, --fps, --title, --region, --grab, --audio-rate
+    livesrv.add_args(live) # --rate, --fps, --title, --region, --grab, --encoder, --audio-rate
+    # the GPU captures, scales and encodes (Desktop Duplication, Quick Sync): what a game leaves of the CPU is not
+    # enough for gdigrab and the software encoder (console tests with Fortnite, 2026-11-15/16)
+    live.set_defaults(grab="ddagrab", encoder="mpeg2_qsv")
     v = live.parse_args(rest)
     v.audio = a.audio
     if v.audio:
