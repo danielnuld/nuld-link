@@ -49,7 +49,7 @@
 #define PAD_PORT 8098
 #define FAST_KBS 2600 // what the fast path may send, KB/s: a SCPH-75001 took this without trouble (nuld-av)
 #define COMBO (PAD_L1 | PAD_L2 | PAD_R1 | PAD_R2)
-#define AUDIO_MS 150 // MP2 waiting before audsrv; ponytail: fixed, an [link] key if the console wants another
+#define AUDIO_MS 80 // MP2 waiting before audsrv, on top of its own ~106 ms: past this, a cut to the newest. 150 left the sound up to a quarter of a second behind a picture that is shown at once
 int lang_en; // lang.h
 
 static void logf_(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
