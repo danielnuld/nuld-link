@@ -9,10 +9,14 @@ emulator, on the TV the PS2 is plugged into, with the PS2 pad. A companion of th
 game mode, 2026-11-15), with [nuld-av](https://github.com/danielnuld/nuld-av). The first version (512x448 through
 ps2sdk's libmpeg over TCP) is in `docs/phase19-results.md` and on the `master` branch.
 
+**To just use it:** download `NULD-Link-2.0.zip` from [Releases](https://github.com/danielnuld/nuld-link/releases)
+and follow its `README.txt` (the PS2's USB stick, the PC's set-up, and what to do when something fails).
+
 ## How it works
 
-- **PC** (`server/link.py`): when the PS2 asks, ffmpeg captures the screen (gdigrab), scales it to 1280x720 and encodes
-  MPEG-2 with I and P pictures only; nuld-av's `psvpack` repacks each picture for the PS2's IPU as it leaves the
+- **PC** (`server/link.py`): when the PS2 asks, ffmpeg captures the screen, scales it to 1280x720 and encodes MPEG-2
+  with I and P pictures only (on an Intel GPU by default: Desktop Duplication and Quick Sync; `--grab gdigrab
+  --encoder mpeg2video` does it on the CPU); nuld-av's `psvpack` repacks each picture for the PS2's IPU as it leaves the
   encoder and it goes out at once by UDP (nuld-av's fast path, with lost datagrams sent again). What Windows plays
   goes in the same stream as MP2. A thread receives the pad over UDP (port 8098) and drives a virtual Xbox 360
   controller (ViGEm). The menu's catalog, covers and launches are small HTTP requests on TCP 8099.
@@ -70,6 +74,6 @@ L3/R3, D-pad. On the PS2 itself: **L1+L2+R1+R2 + TRIANGLE** goes back to the men
 ## Limits
 
 - 16:9 only: the PC's screen is scaled to 1280x720 whatever its shape.
-- If the PS2 or the network falls behind, pictures wait on the PC and the delay grows until it catches up; there
-  is no jump to the newest picture yet.
+- If the PS2 or the network falls 2/3 of a second behind, what waits on the PC is dropped and the capture starts
+  again: a jolt, instead of a delay that grows.
 - 720p output only (the launcher's HDMI set-up); 480i / 240p for a CRT is not done.
