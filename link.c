@@ -407,7 +407,7 @@ static void draw_menu(float s, int sel, float t)
 	gfx_rect(64, 168, 1, 27, NULD_ACID), gfx_rect(64 + tw + 19, 168, 1, 27, NULD_ACID);
 	gfx_text(&gfx_font_mono, 74, 173, src, NULD_ACID);
 	gfx_tracking(1);
-	gfx_text(&gfx_font_mono, 64 + tw + 36, 173, sel ? L("SE ABRE EN LA PC", "OPENS ON THE PC") : L("LA PANTALLA DE LA PC", "THE PC'S SCREEN"), 0xA9B0BA);
+	if (!sel) gfx_text(&gfx_font_mono, 64 + tw + 36, 173, L("LA PANTALLA DE LA PC", "THE PC'S SCREEN"), 0xA9B0BA);
 	gfx_tracking(0);
 	// the row: selected card big at x 64, the rest small to its right, bottoms aligned, sliding with s
 	int py = 232;
