@@ -132,6 +132,53 @@ def c16(src):
 games, covers = [], {} # the last /catalog; covers by source URL / path, converted once per run
 
 
+def windows():
+    """The visible top-level windows with a title, at least 640 wide: {handle: process id}."""
+    import ctypes
+    from ctypes import wintypes
+    u, out = ctypes.windll.user32, {}
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(h, _):
+        r, pid = wintypes.RECT(), wintypes.DWORD()
+        if u.IsWindowVisible(h) and u.GetWindowTextLengthW(h) and u.GetWindowRect(h, ctypes.byref(r)) and r.right - r.left >= 640:
+            u.GetWindowThreadProcessId(h, ctypes.byref(pid))
+            out[h] = pid.value
+        return True
+    u.EnumWindows(each, 0)
+    return out
+
+
+def to_front(before, seconds=120):
+    """A game launched from here opens behind whatever has the keyboard: Windows gives the foreground only to what
+    the user started. For two minutes, each new window (the splash, then the game) is brought to the front; not the
+    launchers' own. A tap of Alt first: it is what lets a background process call SetForegroundWindow."""
+    import ctypes
+    u, k = ctypes.windll.user32, ctypes.windll.kernel32
+    k.OpenProcess.restype = ctypes.c_void_p
+    k.QueryFullProcessImageNameW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_uint)]
+    k.CloseHandle.argtypes = [ctypes.c_void_p]
+
+    def exe(pid):
+        h, b, n = k.OpenProcess(0x1000, False, pid), ctypes.create_unicode_buffer(520), ctypes.c_uint(520)
+        if not h:
+            return ""
+        k.QueryFullProcessImageNameW(h, 0, b, ctypes.byref(n))
+        k.CloseHandle(h)
+        return os.path.basename(b.value).lower()
+    end = time.time() + seconds
+    while time.time() < end:
+        time.sleep(0.5)
+        for h, pid in windows().items():
+            if h not in before and not exe(pid).startswith(("epicgameslauncher", "steam", "explorer")):
+                before[h] = pid
+                u.keybd_event(0x12, 0, 0, 0), u.keybd_event(0x12, 0, 2, 0)
+                if u.IsIconic(h):
+                    u.ShowWindow(h, 9)
+                u.SetForegroundWindow(h)
+                print(f"link: {exe(pid)} to the front", flush=True)
+
+
 def small(c, path):
     """The menu's requests: /catalog, /cover/<n>, /launch/<n>. One answer, then the connection closes."""
     global games
@@ -149,7 +196,9 @@ def small(c, path):
             code = 200 if body else 404
         elif m := re.fullmatch(r"/launch/(\d+)", path):
             print(f"link: launching {games[int(m[1])][1]}", flush=True)
+            before = windows()
             os.startfile(games[int(m[1])][2])
+            threading.Thread(target=to_front, args=(before,), daemon=True).start()
         else:
             code = 404
     except Exception as e: # an index past the catalog, a cover that would not download or decode...
