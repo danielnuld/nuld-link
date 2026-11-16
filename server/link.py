@@ -242,6 +242,13 @@ def small(c, path):
             games = sorted(epic_games() + steam_games() + gfn_games(), key=lambda g: g[1].lower())
             body = "".join(f"{src}\t{name}\n" for src, name, _, _ in games).encode("utf-8")
             print(f"link: catalog, {len(games)} games: {', '.join(g[1] for g in games)}", flush=True)
+        elif path == "/cover/pc":  # the desktop's card: this PC's wallpaper
+            try:
+                import winreg
+                wall = winreg.QueryValueEx(winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Control Panel\Desktop"), "WallPaper")[0]
+                body = c16(wall)
+            except Exception:  # no wallpaper, not Windows, not an image: the drawn card
+                code = 404
         elif m := re.fullmatch(r"/cover/(\d+)", path):
             src = games[int(m[1])][3]
             if src and src not in covers:

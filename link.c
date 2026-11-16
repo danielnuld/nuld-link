@@ -266,7 +266,7 @@ static void play(void) // one stream: until the PC ends it, or the user leaves (
 #define COVER_SW 184
 #define COVER_SH 264
 static char host[64], gname[MAXG][64], gsrc[MAXG][8];
-static unsigned short *gcover[MAXG]; // NULL: none, a drawn card instead
+static unsigned short *gcover[MAXG], *dcover; // NULL: none, a drawn card instead. dcover: the desktop's (/cover/pc)
 static int ngames;
 
 static int get_body(const char *path, void *dst, int max) // the whole body of GET path: its length, or < 0
@@ -320,11 +320,12 @@ static int load_catalog(void) // "SOURCE\tTitle" lines; the game count, or < 0 i
 static void load_covers(void) // ponytail: all at once at the start (188 KB each, MAXG at most), not streamed in
 {
 	char path[24];
-	for (int i = 0; i < ngames; i++) {
+	for (int i = -1; i < ngames; i++) { // -1: the desktop's
 		unsigned short *c = memalign(64, COVER_W * COVER_H * 2);
-		snprintf(path, sizeof(path), "/cover/%d", i);
+		if (i < 0) snprintf(path, sizeof(path), "/cover/pc");
+		else snprintf(path, sizeof(path), "/cover/%d", i);
 		if (c && get_body(path, c, COVER_W * COVER_H * 2) == COVER_W * COVER_H * 2)
-			SyncDCache(c, (u8 *)c + COVER_W * COVER_H * 2), gcover[i] = c;
+			SyncDCache(c, (u8 *)c + COVER_W * COVER_H * 2), *(i < 0 ? &dcover : &gcover[i]) = c;
 		else free(c);
 	}
 }
@@ -345,7 +346,8 @@ static void cut_to(char *t, int n, int w) // shorten to w px, whole UTF-8 letter
 static void card(int i, int x, int y, int big) // the cover, or a hatched panel with the name
 {
 	int w = big ? COVER_W : COVER_SW, h = big ? COVER_H : COVER_SH;
-	if (i && gcover[i - 1]) gfx_image(gcover[i - 1], COVER_W, COVER_H, x, y, w, h);
+	unsigned short *c = i ? gcover[i - 1] : dcover;
+	if (c) gfx_image(c, COVER_W, COVER_H, x, y, w, h);
 	else {
 		gfx_alpha(0x80), gfx_rect(x, y, w, h, 0x11141A);
 		gfx_scissor(x, y, x + w - 1, y + h - 1);
