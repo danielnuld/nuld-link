@@ -194,7 +194,7 @@ static void audio_thread(void *arg)
 		if (ring_used(&aring) + have > 3 * AUDIO_MS * bytes_ms) aring.rd = aring.wr, have = 0, a_dropped++;
 		else if (ring_used(&aring) + have > AUDIO_MS * bytes_ms) skip = 1, a_dropped++;
 		if (have >= (int)sizeof(in) - MAD_BUFFER_GUARD) have = 0; // garbage that never decodes
-		if (!frames && !k) usleep(5000); // half a frame, nothing new: this thread outranks lwIP, do not spin
+		if (!frames && !k) usleep(5000); // half a frame, nothing new: this thread outranks the decoder, do not spin
 	}
 	mad_synth_finish(&sy); // an empty macro in libmad: separate statements
 	mad_frame_finish(&fr);
@@ -236,8 +236,11 @@ static void play(void) // one stream: until the PC ends it, or the user leaves (
 	aring = (ring){abuf, sizeof(abuf), 0, 0};
 	a_on = a_done = a_free_ms = a_dropped = 0, stop = 0;
 	extern void *_gp;
-	// under the player's thread (0x60): libmad runs while that one waits, never in the middle of a picture
-	ee_thread_t at = {.func = audio_thread, .stack = audio_stack, .stack_size = sizeof(audio_stack), .gp_reg = &_gp, .initial_priority = 0x70};
+	// above the player's decoder (0x60), where nuld-av's own audio thread is (0x28). It was under it (0x70) so that
+	// libmad never ran in the middle of a picture: but the decoder does not wait, it works, 19 ms of every 33 with a
+	// game on screen, and the sound got what was left: audsrv ran dry, the frames piled up and were cut, 1 to 2.6
+	// times a second (console, 2026-11-16). A frame of MP2 costs libmad a millisecond or two of every 24
+	ee_thread_t at = {.func = audio_thread, .stack = audio_stack, .stack_size = sizeof(audio_stack), .gp_reg = &_gp, .initial_priority = 0x28};
 	int atid = CreateThread(&at);
 	StartThread(atid, NULL);
 	nav_live_audio(on_audio);
