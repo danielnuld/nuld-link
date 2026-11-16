@@ -116,6 +116,21 @@ def steam_games():
     return out
 
 
+def gfn_games():
+    """GeForce NOW: its own shortcuts on the desktop and in the Start menu. "NVIDIA GeForce NOW" opens the app (its
+    library is walked with the pad); a game's own shortcut (in the app: the game's menu, "add a desktop shortcut")
+    starts that game. Nothing of its library is on disk to read, and the stream is one more window to capture."""
+    dirs = [Path(os.environ.get(v, "")) / d for v, d in (("USERPROFILE", "Desktop"), ("PUBLIC", "Desktop"),
+            ("APPDATA", "Microsoft/Windows/Start Menu/Programs"))]
+    out, seen = [], set()
+    for lnk in (l for d in dirs if d.is_dir() for l in sorted(d.glob("*.lnk"))):
+        name = re.sub(r"(?i)^NVIDIA\s+|\s+(on|en)\s+GeForce NOW$", "", lnk.stem)
+        if "geforce now" in lnk.stem.lower() and name.lower() not in seen:
+            seen.add(name.lower())
+            out.append(("GFN", name, str(lnk), None))
+    return out
+
+
 COVER_W, COVER_H = 256, 368 # cover.h COVER_W x COVER_H, as the launcher's big cover
 
 
@@ -150,23 +165,27 @@ def windows():
     return out
 
 
+def exe(pid):
+    """A process's program name, lower case; "" if it can't be asked."""
+    import ctypes
+    k = ctypes.windll.kernel32
+    k.OpenProcess.restype = ctypes.c_void_p
+    k.QueryFullProcessImageNameW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_uint)]
+    k.CloseHandle.argtypes = [ctypes.c_void_p]
+    h, b, n = k.OpenProcess(0x1000, False, pid), ctypes.create_unicode_buffer(520), ctypes.c_uint(520)
+    if not h:
+        return ""
+    k.QueryFullProcessImageNameW(h, 0, b, ctypes.byref(n))
+    k.CloseHandle(h)
+    return os.path.basename(b.value).lower()
+
+
 def to_front(before, seconds=120):
     """A game launched from here opens behind whatever has the keyboard: Windows gives the foreground only to what
     the user started. For two minutes, each new window (the splash, then the game) is brought to the front; not the
     launchers' own. A tap of Alt first: it is what lets a background process call SetForegroundWindow."""
     import ctypes
-    u, k = ctypes.windll.user32, ctypes.windll.kernel32
-    k.OpenProcess.restype = ctypes.c_void_p
-    k.QueryFullProcessImageNameW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_uint)]
-    k.CloseHandle.argtypes = [ctypes.c_void_p]
-
-    def exe(pid):
-        h, b, n = k.OpenProcess(0x1000, False, pid), ctypes.create_unicode_buffer(520), ctypes.c_uint(520)
-        if not h:
-            return ""
-        k.QueryFullProcessImageNameW(h, 0, b, ctypes.byref(n))
-        k.CloseHandle(h)
-        return os.path.basename(b.value).lower()
+    u = ctypes.windll.user32
     end = time.time() + seconds
     while time.time() < end:
         time.sleep(0.5)
@@ -186,7 +205,7 @@ def small(c, path):
     body, code = b"", 200
     try:
         if path == "/catalog":
-            games = sorted(epic_games() + steam_games(), key=lambda g: g[1].lower())
+            games = sorted(epic_games() + steam_games() + gfn_games(), key=lambda g: g[1].lower())
             body = "".join(f"{src}\t{name}\n" for src, name, _, _ in games).encode("utf-8")
             print(f"link: catalog, {len(games)} games: {', '.join(g[1] for g in games)}", flush=True)
         elif m := re.fullmatch(r"/cover/(\d+)", path):
@@ -198,6 +217,8 @@ def small(c, path):
         elif m := re.fullmatch(r"/launch/(\d+)", path):
             print(f"link: launching {games[int(m[1])][1]}", flush=True)
             before = windows()
+            if games[int(m[1])][0] == "GFN":  # its window may be open already, behind: that one too
+                before = {h: p for h, p in before.items() if not exe(p).startswith("geforcenow")}
             os.startfile(games[int(m[1])][2])
             threading.Thread(target=to_front, args=(before,), daemon=True).start()
         else:
