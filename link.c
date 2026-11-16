@@ -52,18 +52,28 @@
 #define AUDIO_MS 80 // MP2 waiting before audsrv, on top of its own ~106 ms: past this, a cut to the newest. 150 left the sound up to a quarter of a second behind a picture that is shown at once
 int lang_en; // lang.h
 
+static volatile int log_lazy;
 static void logf_(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void logf_(const char *fmt, ...)
 {
-	char b[256];
+	// While a stream plays (log_lazy) the lines wait here and go to the stick every 30 s: a write to USB keeps the
+	// IOP busy, and the IOP is where the stream is received (datagrams were lost in bursts; one suspect)
+	static char pend[6000];
+	static int n;
+	static clock_t last;
+	char b[400];
 	va_list ap;
 	va_start(ap, fmt);
 	vsnprintf(b, sizeof(b), fmt, ap);
 	va_end(ap);
 	printf("%s", b);
 	sio_putsn(b); // the EE serial port too: PCSX2 logs it, and it works when the USB does not
+	n += snprintf(pend + n, sizeof(pend) - n, "%s", b);
+	if (n >= (int)sizeof(pend)) n = sizeof(pend) - 1;
+	if (log_lazy && n < (int)sizeof(pend) - 500 && clock() - last < 30 * CLOCKS_PER_SEC) return;
 	FILE *f = fopen(LOG, "a");
-	if (f) fputs(b, f), fclose(f);
+	if (f) fputs(pend, f), fclose(f);
+	n = 0, last = clock();
 }
 
 // ---- ring: one writer (the player's thread), one reader (the audio thread); size a power of two ----
@@ -205,7 +215,12 @@ static unsigned edges(unsigned b) // the buttons that went down since the last c
 }
 static int leave_combo(unsigned b) { return (b & (COMBO | PAD_START)) == (COMBO | PAD_START); }
 
-static void player_says(const char *line) { logf_("%s", line); }
+static void player_says(const char *line) // the player's line, and what the network had to ask for again so far
+{
+	int n = strlen(line);
+	logf_("%.*s; %u datagrams sent again so far, audio: %d ms free in audsrv, %d cuts\n", n && line[n - 1] == '\n' ? n - 1 : n, line,
+	      nav_net_gaps(), a_free_ms, a_dropped);
+}
 
 static void play(void) // one stream: until the PC ends it, or the user leaves (the pad thread calls nav_stop)
 {
@@ -222,9 +237,9 @@ static void play(void) // one stream: until the PC ends it, or the user leaves (
 	int atid = CreateThread(&at);
 	StartThread(atid, NULL);
 	nav_live_audio(on_audio);
-	pad_live = 1;
+	pad_live = 1, log_lazy = 1;
 	r = nav_play_live(&src, player_says, &st); // takes the GS and this thread until the stream ends
-	stop = 1, pad_live = 0;
+	stop = 1, pad_live = 0, log_lazy = 0;
 	nav_live_audio(NULL);
 	nav_net_close();
 	// the audio thread leaves by itself: terminated inside an audsrv call, the next one hung (jfplay)
