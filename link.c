@@ -154,7 +154,7 @@ static void audio_thread(void *arg)
 	struct mad_stream st;
 	struct mad_frame fr;
 	struct mad_synth sy;
-	int have = 0, rate = 48000, bytes_ms = 24; // 192 kbit/s until the first header
+	int have = 0, rate = 48000, bytes_ms = 24, skip = 0; // 192 kbit/s until the first header
 	mad_stream_init(&st), mad_frame_init(&fr), mad_synth_init(&sy);
 	while (!stop) {
 		int k = ring_used(&aring); // top up the decoder's input from the ring
@@ -170,6 +170,7 @@ static void audio_thread(void *arg)
 				continue; // a damaged frame: skip it
 			}
 			if (stop) break;
+			if (skip) { skip = 0; continue; } // see below
 			mad_synth_frame(&sy, &fr);
 			if (!a_on) {
 				struct audsrv_fmt_t f = {sy.pcm.samplerate, 16, 2};
@@ -187,8 +188,11 @@ static void audio_thread(void *arg)
 		int used = st.next_frame ? st.next_frame - in : 0; // keep the partial frame
 		memmove(in, in + used, have - used);
 		have -= used;
-		if (ring_used(&aring) + have > AUDIO_MS * bytes_ms) // behind the PC: one cut to the newest (libmad resyncs)
-			aring.rd = aring.wr, have = 0, a_dropped++;
+		// behind the PC: one frame (24 ms) left out each time round, a hole too short to lose a sound; far behind, a
+		// cut to the newest (libmad resyncs). Cutting everything at AUDIO_MS took 80 ms and more out, once a second
+		// with a game on the PC (console, 2026-11-16)
+		if (ring_used(&aring) + have > 3 * AUDIO_MS * bytes_ms) aring.rd = aring.wr, have = 0, a_dropped++;
+		else if (ring_used(&aring) + have > AUDIO_MS * bytes_ms) skip = 1, a_dropped++;
 		if (have >= (int)sizeof(in) - MAD_BUFFER_GUARD) have = 0; // garbage that never decodes
 		if (!frames && !k) usleep(5000); // half a frame, nothing new: this thread outranks lwIP, do not spin
 	}
